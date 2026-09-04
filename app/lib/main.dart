@@ -3,7 +3,9 @@ import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'services/api_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ApiService.initBaseUrl();
   runApp(const FinanceControlApp());
 }
 
