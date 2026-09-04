@@ -1,0 +1,1057 @@
+Aplicativo de Controle Financeiro — Especificação funcional | Página 1
+ APLICATIVO DE CONTROLE
+ FINANCEIRO
+ Especificação funcional — visão completa do produto
+Documento-base para planejamento, arquitetura e desenvolvimento de um aplicativo de gestão
+financeira individual e familiar.
+Visão do produto: criar um sistema que vá além do registro de despesas, conectando contas,
+cartões, orçamento, metas, patrimônio, planejamento e finanças familiares em uma única
+experiência.
+
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 2
+1. Usuários e contas
+Cadastro e autenticação
+• Cadastro por e-mail e senha
+ 
+• Login e logout
+ 
+• Recuperação e alteração de senha
+ 
+• Confirmação de e-mail
+ 
+• Login com Google e Apple
+ 
+• Autenticação em dois fatores (2FA)
+ 
+• Controle de sessões e dispositivos
+ 
+• Encerramento remoto de sessões
+ 
+• Exclusão da conta
+ 
+• Exportação dos dados do usuário
+ 
+Perfil
+• Nome, foto, e-mail e telefone
+ 
+• Moeda principal, país, idioma e fuso horário
+ 
+• Primeiro dia do mês financeiro
+ 
+• Configurações de privacidade
+ 
+2. Família / contas compartilhadas
+Família
+• Criar família
+ 
+• Nome e identificação da família
+ 
+• Convidar, aceitar e recusar membros
+ 
+• Remover membros
+ 
+• Sair da família
+ 
+• Transferir administração
+ 
+Perfis e permissões
+• Administrador: acesso completo e gerenciamento da família
+ 
+• Membro: acesso às contas e lançamentos autorizados
+ 
+• Dependente: controle limitado ao próprio orçamento
+ 
+• Permissões por conta para separar finanças pessoais e compartilhadas
+ 
+Compartilhamento seletivo
+• Conta conjunta
+ 
+• Contas individuais
+ 
+• Cartões individuais e compartilhados
+ 
+• Definição de quais membros podem visualizar cada recurso
+ 
+3. Contas financeiras
+Tipos
+• Conta corrente
+ 
+• Poupança
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 3
+• Conta digital
+ 
+• Carteira/dinheiro físico
+ 
+• Conta investimento
+ 
+• Conta conjunta
+ 
+• Conta salário
+ 
+• Conta internacional
+ 
+• Outros
+ 
+Operações
+• Saldo inicial e atual
+ 
+• Depósitos
+ 
+• Saques
+ 
+• Transferências
+ 
+• Ajustes de saldo
+ 
+• Transferências entre contas
+ 
+4. Cartões de crédito
+Cadastro
+• Nome, banco e bandeira
+ 
+• Limite e limite disponível
+ 
+• Fechamento e vencimento
+ 
+• Titular e cartões adicionais
+ 
+Controle
+• Compras
+ 
+• Parcelamentos
+ 
+• Faturas
+ 
+• Pagamento de fatura
+ 
+• Limite utilizado
+ 
+• Compras futuras
+ 
+• Estornos e créditos
+ 
+5. Transações
+Tipos
+• Receita
+ 
+• Despesa
+ 
+• Transferência
+ 
+• Ajuste
+ 
+Dados do lançamento
+• Valor, data e hora
+ 
+• Categoria e subcategoria
+ 
+• Conta ou cartão
+ 
+• Pessoa responsável
+ 
+• Família
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 4
+• Descrição e observações
+ 
+• Tags
+ 
+• Local
+ 
+• Anexo e foto do comprovante
+ 
+6. Transações recorrentes
+Periodicidade
+• Diária
+ 
+• Semanal
+ 
+• Quinzenal
+ 
+• Mensal
+ 
+• Bimestral
+ 
+• Trimestral
+ 
+• Semestral
+ 
+• Anual
+ 
+Configuração
+• Data de início e fim
+ 
+• Número de ocorrências
+ 
+• Despesas e receitas recorrentes
+ 
+• Exemplos: aluguel, salário, energia, assinaturas
+ 
+7. Parcelamentos
+Recursos
+• Criação automática das parcelas
+ 
+• Identificação 1/12, 2/12 etc.
+ 
+• Alteração do parcelamento
+ 
+• Antecipação de parcelas
+ 
+• Cancelamento de parcelas futuras
+ 
+• Registro de pagamento
+ 
+• Saldo restante
+ 
+8. Categorias
+Categorias de despesas
+• Moradia
+ 
+• Alimentação
+ 
+• Transporte
+ 
+• Lazer
+ 
+• Saúde
+ 
+• Educação
+ 
+• Contas
+ 
+• Compras
+ 
+• Outros
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 5
+Categorias de receitas
+• Salário
+ 
+• Freelance
+ 
+• Comissão
+ 
+• Investimentos
+ 
+• Venda
+ 
+• Outros
+ 
+Personalização
+• Criar, editar e excluir
+ 
+• Subcategorias
+ 
+• Ícones e cores
+ 
+• Ordenação
+ 
+9. Orçamento
+Recursos
+• Orçamento mensal por categoria
+ 
+• Orçamento familiar
+ 
+• Percentual utilizado
+ 
+• Alertas de proximidade do limite
+ 
+• Alertas de estouro
+ 
+• Comparação entre orçamento e gasto real
+ 
+10. Planejamento mensal
+Visão mensal
+• Receitas previstas
+ 
+• Despesas previstas
+ 
+• Saldo previsto
+ 
+• Previsto x realizado
+ 
+• Projeção do fechamento do mês
+ 
+11. Dashboard
+Indicadores
+• Saldo total
+ 
+• Receitas
+ 
+• Despesas
+ 
+• Economia
+ 
+• Investimentos
+ 
+• Dívidas
+ 
+• Cartões
+ 
+• Orçamentos
+ 
+Visualizações
+
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 6
+• Gastos por categoria
+ 
+• Evolução mensal
+ 
+• Resumo individual
+ 
+• Resumo familiar
+ 
+12. Relatórios
+Filtros
+• Hoje
+ 
+• Semana
+ 
+• Mês
+ 
+• Ano
+ 
+• Período personalizado
+ 
+• Categoria
+ 
+• Pessoa
+ 
+• Conta
+ 
+• Cartão
+ 
+Relatórios e gráficos
+• Receitas x despesas
+ 
+• Gastos por categoria
+ 
+• Comparação por pessoa
+ 
+• Comparação por conta e cartão
+ 
+• Evolução do patrimônio
+ 
+• Gráficos de pizza, barras e linha
+ 
+13. Análise de gastos
+Análises
+• Histórico por categoria
+ 
+• Comparação entre meses
+ 
+• Variação percentual
+ 
+• Médias de gastos
+ 
+• Identificação de tendências
+ 
+• Análise de gastos familiares
+ 
+14. Notificações
+Financeiras
+• Conta próxima do vencimento
+ 
+• Cartão e fatura
+ 
+• Orçamento próximo ou excedido
+ 
+• Saldo baixo
+ 
+• Parcela próxima
+ 
+• Receita esperada não registrada
+ 
+Família
+
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 7
+• Novo gasto de um membro
+ 
+• Alterações relevantes no orçamento
+ 
+• Eventos financeiros importantes
+ 
+Personalização
+• Escolha dos tipos de notificação
+ 
+• Canais e horários configuráveis
+ 
+15. Segurança
+Proteções
+• Criptografia
+ 
+• HTTPS
+ 
+• Hash seguro de senhas
+ 
+• 2FA
+ 
+• PIN
+ 
+• Biometria
+ 
+• Bloqueio automático
+ 
+• Ocultar valores
+ 
+• Controle de sessões
+ 
+• Logs de acesso
+ 
+• Auditoria
+ 
+• Backup
+ 
+• Exclusão segura
+ 
+Modo privacidade
+• Botão para ocultar saldos e valores sensíveis
+ 
+16. Metas financeiras
+Recursos
+• Criar objetivos
+ 
+• Valor-alvo
+ 
+• Valor acumulado
+ 
+• Prazo
+ 
+• Percentual concluído
+ 
+• Aportes vinculados
+ 
+Exemplos
+• Carro
+ 
+• Viagem
+ 
+• Casa
+ 
+• Reserva de emergência
+ 
+• Celular/computador
+ 
+• Faculdade
+ 
+• Casamento
+ 
+• Investimentos
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 8
+17. Investimentos
+Tipos
+• Tesouro Direto
+ 
+• CDB
+ 
+• LCI/LCA
+ 
+• Ações
+ 
+• ETFs
+ 
+• FIIs
+ 
+• Criptomoedas
+ 
+• Fundos
+ 
+• Poupança
+ 
+• Outros
+ 
+Controle
+• Valor investido
+ 
+• Valor atual
+ 
+• Rentabilidade
+ 
+• Lucro/prejuízo
+ 
+• Dividendos
+ 
+• Aportes
+ 
+• Resgates
+ 
+• Evolução do patrimônio
+ 
+18. Dívidas
+Controle
+• Empréstimos
+ 
+• Financiamentos
+ 
+• Dívidas pessoais
+ 
+• Parcelamentos
+ 
+• Cartões
+ 
+• Valor original
+ 
+• Valor pago
+ 
+• Saldo restante
+ 
+• Vencimentos
+ 
+19. Patrimônio
+Ativos
+• Dinheiro
+ 
+• Contas
+ 
+• Investimentos
+ 
+• Veículos
+ 
+• Imóveis
+ 
+• Outros bens
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 9
+Passivos
+• Financiamentos
+ 
+• Empréstimos
+ 
+• Dívidas
+ 
+• Cartões
+ 
+Indicador
+• Patrimônio líquido = ativos - passivos
+ 
+20. Comprovantes
+Anexos
+• Fotos
+ 
+• PDFs
+ 
+• Notas fiscais
+ 
+• Comprovantes PIX
+ 
+• Recibos
+ 
+• Vinculação do comprovante à transação
+ 
+21. OCR / leitura de comprovantes
+Automação
+• Fotografar comprovante
+ 
+• Reconhecer valor, data e estabelecimento
+ 
+• Sugerir categoria
+ 
+• Criar lançamento automaticamente
+ 
+• Permitir revisão antes de salvar
+ 
+22. Inteligência Artificial
+Assistente financeiro
+• Perguntas em linguagem natural
+ 
+• Quanto gastei este mês?
+ 
+• Onde estou gastando demais?
+ 
+• Posso gastar determinado valor?
+ 
+• Quanto vou economizar até uma data?
+ 
+• Quais assinaturas possuo?
+ 
+• Quanto a família gastou por categoria?
+ 
+Insights automáticos
+• Aumento anormal de gastos
+ 
+• Assinaturas recorrentes
+ 
+• Comparações históricas
+ 
+• Sugestões de economia
+ 
+• Previsões de saldo
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 10
+23. Busca
+Busca global
+• Transações
+ 
+• Parcelas
+ 
+• Categorias
+ 
+• Comprovantes
+ 
+• Contas
+ 
+Filtros
+• Data
+ 
+• Valor
+ 
+• Categoria
+ 
+• Pessoa
+ 
+• Conta
+ 
+• Cartão
+ 
+• Tags
+ 
+24. Tags
+Recursos
+• Criar tags personalizadas
+ 
+• Ex.: #viagem, #trabalho, #casa
+ 
+• Filtrar e gerar relatórios por tag
+ 
+25. Transferências
+Regras
+• Transferência entre contas não deve ser contabilizada como despesa
+ 
+• Transferências entre membros
+ 
+• Transferências para contas familiares
+ 
+26. Múltiplas moedas
+Recursos
+• BRL
+ 
+• USD
+ 
+• EUR
+ 
+• GBP e outras
+ 
+• Conversão cambial
+ 
+• Moeda padrão por usuário e por conta
+ 
+27. Importação de dados
+Formatos
+• CSV
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 11
+• OFX
+ 
+• Excel
+ 
+• Extratos bancários
+ 
+Recursos
+• Mapeamento de colunas
+ 
+• Validação
+ 
+• Prevenção de duplicidades
+ 
+• Revisão antes da importação
+ 
+28. Exportação
+Formatos
+• CSV
+ 
+• Excel
+ 
+• PDF
+ 
+Recursos
+• Exportação por período
+ 
+• Filtros
+ 
+• Relatórios completos
+ 
+• Backup dos dados
+ 
+29. Integração bancária / Open Finance
+Futuro
+• Conexão com instituições financeiras compatíveis
+ 
+• Importação automática de saldo, PIX, compras e transferências
+ 
+• Sincronização de cartões e transações
+ 
+• Atualização automática
+ 
+30. Aplicativo mobile
+Plataformas
+• Android
+ 
+• iOS
+ 
+Recursos
+• Biometria
+ 
+• Notificações push
+ 
+• Widgets
+ 
+• Atalho para adicionar despesa
+ 
+• Modo offline
+ 
+• Sincronização automática
+ 
+31. Aplicação Web
+
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 12
+Recursos
+• Dashboard
+ 
+• Relatórios
+ 
+• Configurações
+ 
+• Família
+ 
+• Contas
+ 
+• Cartões
+ 
+• Metas
+ 
+• Acesso responsivo
+ 
+32. Sincronização
+Recursos
+• Sincronização entre celular e computador
+ 
+• Atualização de lançamentos em tempo real ou quase real
+ 
+• Sincronização das ações dos membros da família
+ 
+33. Funcionamento offline
+Recursos
+• Criar transações offline
+ 
+• Visualizar dados sincronizados
+ 
+• Editar lançamentos
+ 
+• Fila de sincronização ao reconectar
+ 
+34. Regras automáticas
+Exemplos
+• Descrição contém IFOOD → Alimentação
+ 
+• Descrição contém UBER → Transporte
+ 
+• Valor acima de limite → solicitar confirmação
+ 
+• Compra no cartão → vincular à fatura
+ 
+Recursos
+• Criar, editar, ativar/desativar e ordenar regras
+ 
+35. Automação
+Exemplos
+• Adicionar aluguel todo mês
+ 
+• Registrar assinaturas
+ 
+• Separar valor para uma meta
+ 
+• Criar receitas recorrentes
+ 
+Recursos
+• Agendamento
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 13
+• Execução automática
+ 
+• Histórico das automações
+ 
+36. Finanças familiares avançadas
+Visão consolidada
+• Patrimônio familiar
+ 
+• Receitas por membro
+ 
+• Despesas por membro
+ 
+• Metas familiares
+ 
+• Orçamento familiar
+ 
+Exemplos de metas
+• Carro
+ 
+• Viagem
+ 
+• Reserva de emergência
+ 
+• Casa
+ 
+37. Contas para filhos/dependentes
+Recursos
+• Perfil de dependente
+ 
+• Orçamento mensal
+ 
+• Saldo disponível
+ 
+• Histórico de gastos
+ 
+• Acompanhamento pelos responsáveis
+ 
+• Limitações de acesso
+ 
+38. Atividade familiar
+Feed
+• Novo gasto
+ 
+• Pagamento de conta
+ 
+• Aporte em meta
+ 
+• Alteração de orçamento
+ 
+• Identificação de quem realizou cada ação
+ 
+39. Calculadoras financeiras
+Calculadoras
+• Juros compostos
+ 
+• Financiamento
+ 
+• Empréstimo
+ 
+• Investimentos
+ 
+• Aposentadoria
+ 
+• Reserva de emergência
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 14
+• Inflação
+ 
+• Parcelamento
+ 
+• Custo efetivo
+ 
+• Rentabilidade
+ 
+40. Reserva de emergência
+Recursos
+• Estimativa de despesas médias
+ 
+• Meta de meses
+ 
+• Valor recomendado
+ 
+• Valor acumulado
+ 
+• Percentual concluído
+ 
+• Projeção de tempo para atingir a meta
+ 
+41. Calendário financeiro
+Recursos
+• Visualização diária e mensal
+ 
+• Salários
+ 
+• Contas
+ 
+• Faturas
+ 
+• Parcelas
+ 
+• Receitas e despesas previstas
+ 
+42. Fluxo de caixa
+Recursos
+• Saldo atual
+ 
+• Receitas futuras
+ 
+• Despesas futuras
+ 
+• Saldo projetado
+ 
+• Projeção de curto e médio prazo
+ 
+43. Gamificação
+Opcional
+• Conquistas
+ 
+• Metas de economia
+ 
+• Sequências de registro
+ 
+• Desafios familiares
+ 
+• Indicadores de progresso
+ 
+44. Educação financeira
+Conteúdos
+
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 15
+• Orçamento
+ 
+• Dívidas
+ 
+• Reserva de emergência
+ 
+• Investimentos
+ 
+• Cartão de crédito
+ 
+• Financiamento
+ 
+• Juros
+ 
+• Planejamento
+ 
+45. Configurações
+Opções
+• Moeda
+ 
+• Idioma
+ 
+• Tema claro/escuro
+ 
+• Formato de data
+ 
+• Notificações
+ 
+• Privacidade
+ 
+• Segurança
+ 
+• Categorias
+ 
+• Contas
+ 
+• Cartões
+ 
+• Regras
+ 
+• Família
+ 
+• Backup
+ 
+• Exportação
+ 
+• Integrações
+ 
+46. Administração do sistema
+Painel administrativo
+• Usuários
+ 
+• Famílias
+ 
+• Assinaturas
+ 
+• Planos
+ 
+• Uso do sistema
+ 
+• Logs
+ 
+• Suporte
+ 
+• Métricas
+ 
+• Erros
+ 
+• Auditoria
+ 
+47. Monetização
+Plano gratuito
+• Controle individual
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 16
+• Contas
+ 
+• Categorias
+ 
+• Transações
+ 
+• Relatórios básicos
+ 
+Premium
+• Família
+ 
+• Cartões ilimitados
+ 
+• Relatórios avançados
+ 
+• Metas
+ 
+• Investimentos
+ 
+• IA
+ 
+• OCR
+ 
+• Exportações
+ 
+• Open Finance
+ 
+Família Premium
+• Vários membros
+ 
+• Recursos compartilhados
+ 
+• Permissões avançadas
+ 
+• Dashboard familiar
+ 
+---PAGINA---
+Aplicativo de Controle Financeiro — Especificação funcional | Página 17
+48. Arquitetura técnica recomendada
+Como base para o desenvolvimento, a arquitetura pode ser construída com tecnologias já adequadas
+ao projeto: React no frontend web, Spring Boot no backend, MySQL como banco de dados, Redis para
+necessidades de cache/filas e armazenamento de arquivos para comprovantes.
+Arquitetura inicial
+React / Web → API REST / Spring Boot → MySQL + Redis + Storage de arquivos
+Em uma etapa posterior, a arquitetura pode incorporar Open Finance, serviços de IA, OCR, notificações
+push, processamento assíncrono e aplicativos Android/iOS.
+49. Roadmap recomendado
+Fase 1 — MVP
+Cadastro/login, dashboard, contas, receitas, despesas, transferências, categorias, cartões,
+parcelamentos, transações recorrentes, orçamento, relatórios, família, membros, permissões,
+notificações e tema claro/escuro.
+Fase 2 — Financeiro avançado
+Metas, dívidas, patrimônio, investimentos, calendário financeiro, fluxo de caixa, regras automáticas,
+importação CSV/OFX, exportação e comprovantes.
+Fase 3 — Inteligência
+IA financeira, OCR, categorização automática, insights, previsões, recomendações e detecção de
+gastos anormais.
+Fase 4 — Integrações
+Open Finance, integração bancária, sincronização automática e APIs externas.
+50. Diferencial estratégico
+O posicionamento recomendado é transformar o produto no “sistema operacional financeiro
+da família”. Cada lançamento deve poder responder quem gastou, onde, em qual conta ou
+cartão, em qual categoria, qual orçamento foi afetado, qual meta foi impactada e como isso
+altera a situação financeira do indivíduo e da família.
+Exemplo de evolução do produto: o sistema pode identificar que a família comprometeu grande parte
+da renda mensal, comparar despesas fixas e variáveis com o histórico e apresentar uma projeção do
+saldo no fim do mês, acompanhada de recomendações práticas.
