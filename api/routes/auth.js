@@ -18,7 +18,7 @@ const { sendVerificationEmail, sendPasswordResetEmail } = require('../lib/mailer
 
 const router = express.Router();
 
-const SESSION_DAYS = 7;
+const SESSION_DAYS = 365;
 const TOTP_ISSUER = 'Finance Control';
 
 // Freia ataques de força bruta e enumeração de e-mails (spec §15).

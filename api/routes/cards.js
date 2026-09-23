@@ -147,6 +147,19 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // -------------------------------------------------------- faturas (rotas fixas)
 
+// GET /invoices — todas as faturas do usuario, por data de vencimento.
+router.get('/invoices', asyncHandler(async (req, res) => {
+  const [rows] = await db.query(
+    `SELECT i.*, c.name AS card_name, c.color AS card_color, c.brand
+     FROM card_invoices i
+     JOIN credit_cards c ON c.id = i.card_id
+     WHERE i.user_id = ? AND i.status <> 'cancelled'
+     ORDER BY i.due_date DESC`,
+    [req.userId]
+  );
+  res.json(rows.map(withRemaining));
+}));
+
 router.get('/invoices/upcoming', asyncHandler(async (req, res) => {
   const [rows] = await db.query(
     `SELECT i.*, c.name AS card_name, c.color AS card_color, c.brand
@@ -160,8 +173,21 @@ router.get('/invoices/upcoming', asyncHandler(async (req, res) => {
   res.json(rows.map(withRemaining));
 }));
 
+async function ensurePaymentCategory(conn, userId, name = 'Cartão de crédito') {
+  const [rows] = await conn.query(
+    'SELECT id FROM categories WHERE user_id = ? AND name = ? AND type = ? LIMIT 1',
+    [userId, name, 'expense']
+  );
+  if (rows.length > 0) return rows[0].id;
+  const [inserted] = await conn.query(
+    'INSERT INTO categories (user_id, name, type, color) VALUES (?, ?, ?, ?)',
+    [userId, name, 'expense', '#E53935']
+  );
+  return inserted.insertId;
+}
+
 router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
-  const { account_id, amount, date } = req.body;
+  const { account_id, amount, date, category_id } = req.body;
   if (!account_id) throw fail('Informe a conta usada no pagamento.');
 
   const payload = await withTransaction(async conn => {
@@ -188,14 +214,17 @@ router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
 
     const paidAt = date || dates.toIsoDate(new Date());
 
+    const paymentCategoryId = category_id || await ensurePaymentCategory(conn, req.userId);
+
     // Sem card_id: o pagamento debita o saldo da conta, não entra na fatura.
     const transaction = await ledger.createTransaction(conn, req.userId, {
       account_id,
+      category_id: paymentCategoryId,
       type: 'expense',
       amount: value,
       date: paidAt,
       description: `Pagamento fatura ${invoice.card_name} ${invoice.reference_month}`,
-      source: 'manual',
+      source: 'invoice_payment',
     });
 
     await conn.query(
@@ -295,9 +324,10 @@ router.get('/:id/invoices/current', asyncHandler(async (req, res) => {
 
   const [transactions] = await db.query(
     `SELECT t.id, t.date, t.amount, t.description, t.is_refund, t.installment_number, t.installment_id,
-            c.name AS category_name
+            CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END AS category_name
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN categories p ON p.id = c.parent_id
      WHERE t.invoice_id = ? AND t.deleted_at IS NULL
      ORDER BY t.date, t.id`,
     [invoice.id]
@@ -317,9 +347,12 @@ router.get('/:id/invoices/:reference_month', asyncHandler(async (req, res) => {
 
   const [transactions] = await db.query(
     `SELECT t.id, t.date, t.amount, t.description, t.notes, t.is_refund, t.installment_id,
-            t.installment_number, t.source, c.name AS category_name, c.color AS category_color
+            t.installment_number, t.source,
+            CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END AS category_name,
+            c.color AS category_color
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN categories p ON p.id = c.parent_id
      WHERE t.invoice_id = ? AND t.deleted_at IS NULL
      ORDER BY t.date, t.id`,
     [invoice.id]
@@ -357,7 +390,7 @@ router.post('/', asyncHandler(async (req, res) => {
     [
       req.userId, data.name, data.bank || null, data.brand || null, data.limit_amount || 0,
       data.closing_day || null, data.due_day || null, data.holder_name || null, data.last_digits || null,
-      data.color || null, data.currency || 'BRL', data.family_id || null, data.shared ? 1 : 0,
+      data.color || '#1565C0', data.currency || 'BRL', data.family_id || null, data.shared ? 1 : 0,
       data.default_account_id || null, data.parent_card_id || null, isAdditional,
     ]
   );
@@ -450,13 +483,23 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
 router.post('/:id/purchases', asyncHandler(async (req, res) => {
   const card = await findCard(req.userId, req.params.id);
-  const { amount, date, category_id = null, description = null, notes = null, family_id = null } = req.body;
+  const {
+    amount, date, category_id = null, description = null, notes = null, family_id = null,
+    accrual_date = null, payment_date = null, is_paid = false,
+    payment_method = 'CREDIT_CARD', cost_center_id = null, contact_id = null,
+    classification = null, pc_reference = null, item = null,
+  } = req.body;
   const count = Number(req.body.installments || 1);
 
   if (!amount || Number(amount) <= 0) throw fail('Informe o valor da compra.');
   if (!date) throw fail('Informe a data da compra.');
   if (!Number.isInteger(count) || count < 1 || count > 480) throw fail('Número de parcelas inválido.');
   if (family_id) await scope.assertCanUseFamily(req.userId, family_id);
+
+  const extra = {
+    accrual_date, payment_date, is_paid, payment_method,
+    cost_center_id, contact_id, classification, pc_reference, item,
+  };
 
   const result = await withTransaction(async conn => {
     if (count === 1) {
@@ -470,6 +513,7 @@ router.post('/:id/purchases', asyncHandler(async (req, res) => {
         notes,
         family_id,
         source: 'manual',
+        ...extra,
       });
       return { transaction, installment: null, items: [] };
     }
@@ -503,6 +547,8 @@ router.post('/:id/purchases', asyncHandler(async (req, res) => {
         installment_id: installmentId,
         installment_number: number,
         source: 'installment',
+        ...extra,
+        accrual_date: dueDate,
       });
 
       const [item] = await conn.query(

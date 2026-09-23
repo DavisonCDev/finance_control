@@ -65,8 +65,9 @@ async function childrenOf(categoryIds) {
   return map;
 }
 
-// Total gasto por categoria no intervalo. Compras no cartão entram normalmente:
-// não afetam saldo de conta, mas são despesa para orçamento (spec §9).
+// Total gasto por categoria no intervalo. So conta despesa efetivamente paga:
+// compra no cartao nao e gasto aqui — ela vira gasto quando a fatura e paga,
+// e pagamento de fatura e contabilizado na secao de cartao, nao na categoria.
 async function spentByCategory(userId, { start, end }) {
   const visibility = await scope.visibilityClause(userId, 't');
   const [rows] = await db.query(
@@ -75,6 +76,9 @@ async function spentByCategory(userId, { start, end }) {
      WHERE ${visibility.sql}
        AND t.type = 'expense' AND t.deleted_at IS NULL
        AND t.status <> 'cancelled'
+       AND t.is_paid = TRUE
+       AND t.card_id IS NULL
+       AND (t.source IS NULL OR t.source <> 'invoice_payment')
        AND t.date BETWEEN ? AND ?
      GROUP BY t.category_id`,
     [...visibility.params, start, end]
@@ -134,9 +138,11 @@ async function loadBudgetsWithSpent(userId, month, firstDay, { familyId = null, 
     params.push(...visibility.params);
   }
 
-  let sql = `SELECT b.*, c.name AS category_name, c.color AS category_color, c.icon AS category_icon
+  let sql = `SELECT b.*, CASE WHEN pc.name IS NULL THEN c.name ELSE CONCAT(pc.name, ' › ', c.name) END AS category_name,
+                    c.color AS category_color, c.icon AS category_icon
              FROM budgets b
              JOIN categories c ON c.id = b.category_id
+             LEFT JOIN categories pc ON pc.id = c.parent_id
              WHERE ${where} AND b.budget_month = ?`;
   params.push(month);
 
@@ -168,8 +174,10 @@ async function loadBudgetsWithSpent(userId, month, firstDay, { familyId = null, 
 
 async function loadBudget(userId, id) {
   const [rows] = await db.query(
-    `SELECT b.*, c.name AS category_name, c.color AS category_color, c.icon AS category_icon
+    `SELECT b.*, CASE WHEN pc.name IS NULL THEN c.name ELSE CONCAT(pc.name, ' › ', c.name) END AS category_name,
+            c.color AS category_color, c.icon AS category_icon
      FROM budgets b JOIN categories c ON c.id = b.category_id
+     LEFT JOIN categories pc ON pc.id = c.parent_id
      WHERE b.id = ? AND b.user_id = ?`,
     [id, userId]
   );
@@ -178,25 +186,98 @@ async function loadBudget(userId, id) {
 }
 
 // GET / — orçamentos do mês com gasto, percentual, status e totais.
+// Tambem traz as faturas de cartao com vencimento no mes: o "previsto cartao"
+// e o valor da fatura que sera debitada; o "gasto cartao" so soma o que foi
+// efetivamente pago.
 router.get('/', asyncHandler(async (req, res) => {
   const month = assertMonth(req.query.month || dates.currentMonth());
   const familyId = req.query.family_id || null;
 
-  const { rows } = await loadBudgetsWithSpent(req.userId, month, req.user.first_day_of_month, { familyId });
+  const { bounds, rows } = await loadBudgetsWithSpent(req.userId, month, req.user.first_day_of_month, { familyId });
 
   const budgeted = rows.reduce((sum, r) => sum + r.amount, 0);
   const spent = rows.reduce((sum, r) => sum + r.spent, 0);
+
+  const [invoiceRows] = await db.query(
+    `SELECT i.id, i.card_id, i.reference_month, i.total_amount, i.paid_amount,
+            i.due_date, i.closing_date, i.status, c.name AS card_name, c.color AS card_color
+     FROM card_invoices i
+     JOIN credit_cards c ON c.id = i.card_id
+     WHERE i.user_id = ? AND i.due_date BETWEEN ? AND ? AND i.status <> 'cancelled'
+       AND (i.total_amount > 0 OR i.paid_amount > 0)
+     ORDER BY i.due_date`,
+    [req.userId, bounds.start, bounds.end]
+  );
+  const cardInvoices = invoiceRows.map(i => ({
+    ...i,
+    total_amount: Number(i.total_amount),
+    paid_amount: Number(i.paid_amount),
+    remaining: Number((Number(i.total_amount) - Number(i.paid_amount)).toFixed(2)),
+  }));
+  const cardForecast = cardInvoices.reduce((s, i) => s + i.total_amount, 0);
+  const cardSpent = cardInvoices.reduce((s, i) => s + i.paid_amount, 0);
+
+  // Categorias das compras que compoem as faturas do mes: total geral e por fatura.
+  let cardCategories = [];
+  if (cardInvoices.length > 0) {
+    const ids = cardInvoices.map(i => i.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const [catRows] = await db.query(
+      `SELECT t.invoice_id,
+              COALESCE(IF(p.name IS NULL, c.name, CONCAT(p.name, ' › ', c.name)), 'Sem categoria') AS category_name,
+              c.color AS category_color,
+              SUM(CASE WHEN t.is_refund THEN -t.amount ELSE t.amount END) AS total
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       LEFT JOIN categories p ON p.id = c.parent_id
+       WHERE t.invoice_id IN (${placeholders})
+         AND t.deleted_at IS NULL AND t.status <> 'cancelled'
+       GROUP BY t.invoice_id, c.id, c.name, c.color
+       ORDER BY total DESC`,
+      ids
+    );
+
+    const byInvoice = new Map();
+    const aggregate = new Map();
+    for (const r of catRows) {
+      const entry = {
+        category_name: r.category_name,
+        category_color: r.category_color,
+        total: Number(r.total),
+      };
+      const key = Number(r.invoice_id);
+      if (!byInvoice.has(key)) byInvoice.set(key, []);
+      byInvoice.get(key).push(entry);
+      const agg = aggregate.get(entry.category_name) || 0;
+      aggregate.set(entry.category_name, agg + entry.total);
+    }
+    for (const inv of cardInvoices) {
+      inv.categories = byInvoice.get(Number(inv.id)) || [];
+    }
+    cardCategories = [...aggregate.entries()]
+      .map(([category_name, total]) => ({ category_name, total: Number(total.toFixed(2)) }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  const forecastTotal = budgeted + cardForecast;
+  const spentTotal = spent + cardSpent;
 
   res.json({
     month,
     budgets: rows,
     // O app antigo lê a lista direta; mantemos ambos os formatos.
     items: rows,
+    card_invoices: cardInvoices,
+    card_categories: cardCategories,
     totals: {
       budgeted: Number(budgeted.toFixed(2)),
       spent: Number(spent.toFixed(2)),
-      remaining: Number((budgeted - spent).toFixed(2)),
-      percent: budgeted > 0 ? Number(((spent / budgeted) * 100).toFixed(2)) : 0,
+      card_forecast: Number(cardForecast.toFixed(2)),
+      card_spent: Number(cardSpent.toFixed(2)),
+      forecast_total: Number(forecastTotal.toFixed(2)),
+      spent_total: Number(spentTotal.toFixed(2)),
+      remaining: Number((forecastTotal - spentTotal).toFixed(2)),
+      percent: forecastTotal > 0 ? Number(((spentTotal / forecastTotal) * 100).toFixed(2)) : 0,
     },
   });
 }));
@@ -422,10 +503,21 @@ router.put('/:id', asyncHandler(async (req, res) => {
 }));
 
 router.delete('/:id', asyncHandler(async (req, res) => {
+  const allMonths = parseBool(req.query.all_months);
   const budget = await loadBudget(req.userId, req.params.id);
-  await db.query('DELETE FROM budgets WHERE id = ? AND user_id = ?', [budget.id, req.userId]);
-  await audit(req.userId, 'budget', budget.id, 'delete', budget);
-  res.json({ message: 'Orçamento removido.' });
+
+  if (allMonths) {
+    await db.query(
+      'DELETE FROM budgets WHERE user_id = ? AND category_id = ?',
+      [req.userId, budget.category_id]
+    );
+    await audit(req.userId, 'budget', budget.id, 'delete', { ...budget, all_months: true });
+    res.json({ message: 'Previsões da categoria removidas.' });
+  } else {
+    await db.query('DELETE FROM budgets WHERE id = ? AND user_id = ?', [budget.id, req.userId]);
+    await audit(req.userId, 'budget', budget.id, 'delete', budget);
+    res.json({ message: 'Previsão removida.' });
+  }
 }));
 
 module.exports = router;

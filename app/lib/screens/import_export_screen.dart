@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import '../models/account.dart';
 import '../models/category.dart';
 import '../services/api_service.dart';
+import '../utils/formatters.dart';
 
 class ImportExportScreen extends StatefulWidget {
   const ImportExportScreen({super.key});
@@ -34,8 +34,12 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       ApiService.get('/categories'),
     ]);
     setState(() {
-      accounts = (ApiService.decode(aRes) as List).map((e) => Account.fromJson(e)).toList();
-      categories = (ApiService.decode(cRes) as List).map((e) => Category.fromJson(e)).toList();
+      accounts = (ApiService.decode(aRes) as List)
+          .map((e) => Account.fromJson(e))
+          .toList();
+      categories = (ApiService.decode(cRes) as List)
+          .map((e) => Category.fromJson(e))
+          .toList();
       if (accounts.isNotEmpty) selectedAccountId = accounts.first.id;
       if (categories.isNotEmpty) selectedCategoryId = categories.first.id;
     });
@@ -43,7 +47,16 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
   String _categoryName(int? id) {
     if (id == null) return 'Padrão';
-    final c = categories.firstWhere((c) => c.id == id, orElse: () => Category(id: 0, name: 'Desconhecida', type: 'expense', color: '#000000', icon: ''));
+    final c = categories.firstWhere(
+      (c) => c.id == id,
+      orElse: () => Category(
+        id: 0,
+        name: 'Desconhecida',
+        type: 'expense',
+        color: '#000000',
+        icon: '',
+      ),
+    );
     return c.name;
   }
 
@@ -61,11 +74,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       Uri.parse('${ApiService.baseUrl}/import-pdf/'),
     );
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(http.MultipartFile.fromBytes(
-      'file',
-      bytes,
-      filename: file.name,
-    ));
+    request.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: file.name),
+    );
 
     final response = await request.send();
     final body = await response.stream.bytesToString();
@@ -84,7 +95,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     if (parsedTransactions.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nenhuma transação encontrada no PDF. Verifique se o formato é do Itaú.')),
+          const SnackBar(
+            content: Text(
+              'Nenhuma transação encontrada no PDF. Verifique se o formato é do Itaú.',
+            ),
+          ),
         );
       }
     }
@@ -92,7 +107,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
   Future<void> _importPdfTransactions() async {
     if (selectedAccountId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma conta')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Selecione uma conta')));
       return;
     }
 
@@ -104,9 +121,17 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
     if (res.statusCode == 200) {
       setState(() => parsedTransactions = []);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transações importadas com sucesso!')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transações importadas com sucesso!')),
+        );
+      }
     } else {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${res.body}')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro: ${res.body}')));
+      }
     }
   }
 
@@ -120,7 +145,10 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             title: const Text('Exportação CSV'),
             content: SingleChildScrollView(child: Text(res.body)),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar')),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fechar'),
+              ),
             ],
           ),
         );
@@ -150,29 +178,41 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                 onSelectionChanged: (s) {
                   setDialogState(() {
                     type = s.first;
-                    categoryId = categories.firstWhere((c) => c.type == type).id;
+                    categoryId = categories
+                        .firstWhere((c) => c.type == type)
+                        .id;
                   });
                 },
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
-                value: categoryId,
+                initialValue: categoryId,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Categoria'),
                 items: categories
                     .where((c) => c.type == type)
-                    .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)))
+                    .map(
+                      (c) => DropdownMenuItem(
+                        value: c.id,
+                        child: Text(c.name, overflow: TextOverflow.ellipsis),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) => setDialogState(() => categoryId = v),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
             FilledButton(
               onPressed: () {
                 setState(() {
-                  final updated = Map<String, dynamic>.from(parsedTransactions[index]);
+                  final updated = Map<String, dynamic>.from(
+                    parsedTransactions[index],
+                  );
                   updated['type'] = type;
                   updated['category_id'] = categoryId;
                   parsedTransactions[index] = updated;
@@ -190,7 +230,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Importar / Exportar')),
+      appBar: AppBar(
+        title: const Text('Importar / Exportar'),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -204,22 +246,46 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                     label: const Text('Exportar transações (CSV)'),
                   ),
                   const SizedBox(height: 24),
-                  Text('Importar por PDF (Itaú)', style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    'Importar por PDF (Itaú)',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 8),
                   if (accounts.isNotEmpty)
                     DropdownButtonFormField<int>(
-                      value: selectedAccountId,
-                      decoration: const InputDecoration(labelText: 'Conta destino'),
-                      items: accounts.map((a) => DropdownMenuItem(value: a.id, child: Text(a.name))).toList(),
+                      initialValue: selectedAccountId,
+                      decoration: const InputDecoration(
+                        labelText: 'Conta destino',
+                      ),
+                      items: accounts
+                          .map(
+                            (a) => DropdownMenuItem(
+                              value: a.id,
+                              child: Text(a.name),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (v) => setState(() => selectedAccountId = v),
                     ),
                   const SizedBox(height: 8),
                   if (categories.isNotEmpty)
                     DropdownButtonFormField<int>(
-                      value: selectedCategoryId,
+                      initialValue: selectedCategoryId,
                       isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Categoria padrão'),
-                      items: categories.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))).toList(),
+                      decoration: const InputDecoration(
+                        labelText: 'Categoria padrão',
+                      ),
+                      items: categories
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c.id,
+                              child: Text(
+                                c.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (v) => setState(() => selectedCategoryId = v),
                     ),
                   const SizedBox(height: 16),
@@ -230,24 +296,36 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                   ),
                   if (parsedTransactions.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    Text('${parsedTransactions.length} transações encontradas:', style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      '${parsedTransactions.length} transações encontradas:',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 8),
                     ...parsedTransactions.asMap().entries.map((entry) {
                       final i = entry.key;
                       final t = entry.value;
                       return ListTile(
                         title: Text(t['description'] ?? ''),
-                        subtitle: Text('${t['date']} • R\$ ${t['amount'].toStringAsFixed(2)} • ${t['type'] == 'income' ? 'Receita' : 'Despesa'}'),
+                        subtitle: Text(
+                          '${fmtDate(t['date'])} • R\$ ${fmtMoney(t['amount'])} • ${t['type'] == 'income' ? 'Receita' : 'Despesa'}',
+                        ),
                         trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: t['type'] == 'income' ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                            color: t['type'] == 'income'
+                                ? Colors.green.withValues(alpha: 0.15)
+                                : Colors.orange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Text(
                             _categoryName(t['category_id']),
                             style: TextStyle(
-                              color: t['type'] == 'income' ? Colors.green : Colors.orange,
+                              color: t['type'] == 'income'
+                                  ? Colors.green.shade700
+                                  : Colors.orange.shade700,
                               fontWeight: FontWeight.bold,
                             ),
                           ),

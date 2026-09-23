@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static String baseUrl = 'http://localhost:3000';
+  static String baseUrl = 'http://129.148.60.52:3000';
 
   static Future<void> initBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
@@ -41,10 +41,16 @@ class ApiService {
   }
 
   static Future<http.Response> get(String path) async {
-    return await http.get(Uri.parse('$baseUrl$path'), headers: await _headers());
+    return await http.get(
+      Uri.parse('$baseUrl$path'),
+      headers: await _headers(),
+    );
   }
 
-  static Future<http.Response> post(String path, Map<String, dynamic> body) async {
+  static Future<http.Response> post(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     return await http.post(
       Uri.parse('$baseUrl$path'),
       headers: await _headers(),
@@ -52,7 +58,10 @@ class ApiService {
     );
   }
 
-  static Future<http.Response> put(String path, Map<String, dynamic> body) async {
+  static Future<http.Response> put(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     return await http.put(
       Uri.parse('$baseUrl$path'),
       headers: await _headers(),
@@ -60,8 +69,15 @@ class ApiService {
     );
   }
 
-  static Future<http.Response> delete(String path) async {
-    return await http.delete(Uri.parse('$baseUrl$path'), headers: await _headers());
+  static Future<http.Response> delete(
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async {
+    return await http.delete(
+      Uri.parse('$baseUrl$path'),
+      headers: await _headers(),
+      body: body != null ? jsonEncode(body) : null,
+    );
   }
 
   static dynamic decode(http.Response res) {

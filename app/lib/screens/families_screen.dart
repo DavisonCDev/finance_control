@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -33,9 +32,15 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Nova família'),
-        content: TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nome')),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Nome'),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
           FilledButton(
             onPressed: () async {
               await ApiService.post('/families', {'name': nameController.text});
@@ -52,7 +57,9 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Família')),
+      appBar: AppBar(
+        title: const Text('Família'),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(

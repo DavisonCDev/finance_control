@@ -10,6 +10,7 @@ const { asyncHandler } = require('../middleware/errors');
 const { audit, familyActivity } = require('../lib/audit');
 const scope = require('../lib/scope');
 const ledger = require('../lib/ledger');
+const { generateDue } = require('../services/recurringGen');
 const { applyRules } = require('../lib/rules');
 const gamification = require('../lib/gamification');
 const dates = require('../lib/dates');
@@ -178,6 +179,14 @@ const COUNT_FROM = `
 
 // GET / — listagem filtrada com total e resumo.
 router.get('/', asyncHandler(async (req, res) => {
+  // Catch-up: materializa ocorrencias de recorrencia que ja venceram,
+  // para que aparecam na lista sem acao manual do usuario.
+  try {
+    await withTransaction(conn => generateDue(conn, req.userId));
+  } catch (err) {
+    // Falha na geracao nao impede a listagem.
+  }
+
   const { where, params } = await buildFilters(req);
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
@@ -484,6 +493,9 @@ router.put('/:id', asyncHandler(async (req, res) => {
     'account_id', 'category_id', 'card_id', 'type', 'amount', 'date', 'time', 'description',
     'notes', 'family_id', 'person_id', 'location', 'currency', 'status', 'transfer_account_id',
     'goal_id', 'is_refund',
+    'accrual_date', 'payment_date', 'is_paid', 'payment_method',
+    'cost_center_id', 'contact_id',
+    'classification', 'pc_reference', 'item',
   ]) {
     if (body[field] !== undefined) payload[field] = body[field];
   }
@@ -560,6 +572,15 @@ function buildPayload(body = {}, req) {
     source: body.source || 'manual',
     is_refund: parseBool(body.is_refund, false),
     tagIds: Array.isArray(tagIds) ? tagIds.map(Number).filter(Boolean) : [],
+    accrual_date: body.accrual_date ? String(body.accrual_date).slice(0, 10) : null,
+    payment_date: body.payment_date ? String(body.payment_date).slice(0, 10) : null,
+    is_paid: body.is_paid !== undefined ? parseBool(body.is_paid, true) : (body.status !== 'scheduled'),
+    payment_method: body.payment_method || 'OTHER',
+    cost_center_id: body.cost_center_id || null,
+    contact_id: body.contact_id || null,
+    classification: body.classification || null,
+    pc_reference: body.pc_reference || null,
+    item: body.item || null,
   };
 }
 
@@ -604,6 +625,20 @@ async function validateReferences(userId, payload) {
       [payload.category_id, userId]
     );
     if (rows.length === 0) throw notFound('Categoria não encontrada.');
+  }
+  if (payload.cost_center_id) {
+    const [rows] = await db.query(
+      'SELECT id FROM cost_centers WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
+      [payload.cost_center_id, userId]
+    );
+    if (rows.length === 0) throw notFound('Centro de custo não encontrado.');
+  }
+  if (payload.contact_id) {
+    const [rows] = await db.query(
+      'SELECT id FROM contacts WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
+      [payload.contact_id, userId]
+    );
+    if (rows.length === 0) throw notFound('Contato não encontrado.');
   }
   if (Array.isArray(payload.tagIds) && payload.tagIds.length > 0) {
     const placeholders = payload.tagIds.map(() => '?').join(', ');

@@ -19,9 +19,12 @@ class Goal {
       name: json['name'],
       targetAmount: double.tryParse(json['target_amount'].toString()) ?? 0.0,
       currentAmount: double.tryParse(json['current_amount'].toString()) ?? 0.0,
-      deadline: json['deadline'] != null ? DateTime.parse(json['deadline']) : null,
+      deadline: json['deadline'] != null
+          ? DateTime.parse(json['deadline'])
+          : null,
     );
   }
 
-  double get percent => targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
+  double get percent =>
+      targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
 }

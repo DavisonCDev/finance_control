@@ -3,7 +3,9 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  dynamic_color
   file_selector_linux
+  system_theme
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

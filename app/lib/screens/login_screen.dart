@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'main_screen.dart';
@@ -63,39 +62,66 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.account_balance, size: 72, color: Color(0xFF0D47A1)),
+                Icon(
+                  Icons.account_balance,
+                  size: 72,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'Finance Control',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 32),
                 if (!_isLogin)
                   TextField(
                     controller: _nameController,
-                    decoration: const InputDecoration(labelText: 'Nome', prefixIcon: Icon(Icons.person)),
+                    decoration: const InputDecoration(
+                      labelText: 'Nome',
+                      prefixIcon: Icon(Icons.person),
+                    ),
                   ),
                 TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: 'E-mail', prefixIcon: Icon(Icons.email)),
+                  decoration: const InputDecoration(
+                    labelText: 'E-mail',
+                    prefixIcon: Icon(Icons.email),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Senha', prefixIcon: Icon(Icons.lock)),
+                  decoration: const InputDecoration(
+                    labelText: 'Senha',
+                    prefixIcon: Icon(Icons.lock),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (_error != null)
-                  Text(_error!, style: const TextStyle(color: Colors.red)),
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: _loading ? null : _submit,
                     child: _loading
-                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : Text(_isLogin ? 'Entrar' : 'Cadastrar'),
                   ),
                 ),

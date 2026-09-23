@@ -56,6 +56,8 @@ const routes = {
   '/sync': './routes/sync',
   '/open-finance': './routes/openfinance',
   '/currencies': './routes/currencies',
+  '/cost-centers': './routes/cost_centers',
+  '/contacts': './routes/contacts',
 };
 
 for (const [path, modulePath] of Object.entries(routes)) {

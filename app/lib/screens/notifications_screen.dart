@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -22,7 +21,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _load() async {
     final res = await ApiService.get('/notifications');
     setState(() {
-      items = ApiService.decode(res) as List;
+      final data = ApiService.decode(res) as Map<String, dynamic>;
+      items = data['notifications'] as List? ?? [];
       loading = false;
     });
   }
@@ -30,7 +30,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Notificações')),
+      appBar: AppBar(
+        title: const Text('Notificações'),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
@@ -41,7 +43,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   leading: const Icon(Icons.notifications),
                   title: Text(n['title']),
                   subtitle: Text(n['message'] ?? ''),
-                  trailing: n['read_at'] != null ? const Icon(Icons.check, color: Colors.green) : null,
+                  trailing: n['read_at'] != null
+                      ? Icon(Icons.check, color: Colors.green.shade600)
+                      : null,
                 );
               },
             ),

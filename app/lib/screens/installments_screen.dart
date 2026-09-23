@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -20,32 +19,45 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   }
 
   Future<void> _load() async {
-    final res = await ApiService.get('/installments');
-    setState(() {
-      items = ApiService.decode(res) as List;
-      loading = false;
-    });
+    try {
+      final res = await ApiService.get('/installments');
+      setState(() {
+        items = ApiService.decode(res) as List;
+        loading = false;
+      });
+    } catch (e) {
+      setState(() => loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Parcelamentos')),
+      appBar: AppBar(
+        title: const Text('Parcelamentos'),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : items.isEmpty
-              ? const Center(child: Text('Nenhum parcelamento cadastrado.'))
-              : ListView.builder(
+          ? const Center(child: Text('Nenhum parcelamento cadastrado.'))
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: ListView.builder(
                   itemCount: items.length,
                   itemBuilder: (_, i) {
                     final item = items[i];
                     return ListTile(
                       title: Text(item['description'] ?? 'Parcelamento'),
-                      subtitle: Text('Parcela ${item['current_installment']}/${item['total_installments']}'),
+                      subtitle: Text(
+                        'Parcela ${item['current_installment']}/${item['total_installments']}',
+                      ),
                       trailing: Text('R\$ ${item['amount']}'),
                     );
                   },
                 ),
+              ),
+            ),
     );
   }
 }

@@ -3,7 +3,6 @@ const express = require('express');
 const db = require('../db');
 const { withTransaction } = require('../db');
 const authenticate = require('../middleware/auth');
-const { requireFeature } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errors');
 const { audit } = require('../lib/audit');
 const scope = require('../lib/scope');
@@ -12,7 +11,6 @@ const dates = require('../lib/dates');
 
 const router = express.Router();
 router.use(authenticate);
-router.use(requireFeature('investments'));
 
 const TYPE_LABELS = {
   treasury: 'Tesouro Direto',
@@ -23,6 +21,7 @@ const TYPE_LABELS = {
   reit: 'Fundos Imobiliários',
   crypto: 'Criptomoedas',
   fund: 'Fundos',
+  fixed_income: 'Renda fixa',
   savings: 'Poupança',
   pension: 'Previdência',
   other: 'Outros',

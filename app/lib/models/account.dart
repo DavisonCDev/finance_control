@@ -18,8 +18,10 @@ class Account {
       id: json['id'],
       name: json['name'],
       type: json['type'],
-      initialBalance: double.tryParse(json['initial_balance'].toString()) ?? 0.0,
-      currentBalance: double.tryParse(json['current_balance'].toString()) ?? 0.0,
+      initialBalance:
+          double.tryParse(json['initial_balance'].toString()) ?? 0.0,
+      currentBalance:
+          double.tryParse(json['current_balance'].toString()) ?? 0.0,
     );
   }
 
@@ -32,7 +34,7 @@ class Account {
       case 'digital':
         return 'Conta digital';
       case 'cash':
-        return 'Dinheiro';
+        return 'Carteira';
       case 'investment':
         return 'Investimento';
       case 'salary':

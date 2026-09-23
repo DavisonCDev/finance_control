@@ -34,3 +34,5 @@ itau_extrato.txt
 *.xlsx
 key_sheets_extract.json
 nul
+spreadsheet_content.json
+spreadsheet_summary.json
