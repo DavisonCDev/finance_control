@@ -29,3 +29,8 @@ Thumbs.db
 
 # Dados sensíveis de teste
 itau_extrato.txt
+
+# Dados pessoais (não versionar)
+*.xlsx
+key_sheets_extract.json
+nul
