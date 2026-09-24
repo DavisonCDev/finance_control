@@ -4,6 +4,7 @@ class Transaction {
   final int? categoryId;
   final int? cardId;
   final int? installmentId;
+  final int? recurringId;
   final int? transferAccountId;
   final int? costCenterId;
   final int? contactId;
@@ -35,6 +36,7 @@ class Transaction {
     this.categoryId,
     this.cardId,
     this.installmentId,
+    this.recurringId,
     this.transferAccountId,
     this.costCenterId,
     this.contactId,
@@ -68,6 +70,7 @@ class Transaction {
       categoryId: json['category_id'],
       cardId: json['card_id'],
       installmentId: json['installment_id'],
+      recurringId: json['recurring_id'],
       transferAccountId: json['transfer_account_id'],
       costCenterId: json['cost_center_id'],
       contactId: json['contact_id'],

@@ -231,26 +231,40 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
   }
 
   Future<void> _delete() async {
-    final confirmed = await showDialog<bool>(
+    final tx = widget.transactionToEdit!;
+    // Transacao gerada por recorrencia: pergunta se apaga so esta ou a serie.
+    final recurringId = tx.recurringId;
+    final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir transação?'),
-        content: const Text('O saldo e as previsões serão atualizados.'),
+        content: Text(
+          recurringId != null
+              ? 'Esta despesa faz parte de uma recorrência. '
+                  'Deseja excluir somente esta ou todas as da série?'
+              : 'O saldo e as previsões serão atualizados.',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
+          if (recurringId != null)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'all'),
+              child: const Text('Todas da série'),
+            ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Excluir'),
+            onPressed: () => Navigator.pop(context, 'one'),
+            child: Text(recurringId != null ? 'Somente esta' : 'Excluir'),
           ),
         ],
       ),
     );
-    if (confirmed != true) return;
-    final res = await ApiService.delete(
-        '/transactions/${widget.transactionToEdit!.id}');
+    if (choice == null) return;
+    final res = choice == 'all'
+        ? await ApiService.delete('/recurring/$recurringId')
+        : await ApiService.delete('/transactions/${tx.id}');
     if (!mounted) return;
     if (res.statusCode == 200) {
       Navigator.pop(context, true);

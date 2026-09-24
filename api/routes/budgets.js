@@ -262,6 +262,19 @@ router.get('/', asyncHandler(async (req, res) => {
   const forecastTotal = budgeted + cardForecast;
   const spentTotal = spent + cardSpent;
 
+  // Receita prevista: toda receita lancada dentro do mes (atual ou futura).
+  const incomeVisibility = await scope.visibilityClause(req.userId, 't');
+  const [incomeRows] = await db.query(
+    `SELECT COALESCE(SUM(t.amount), 0) AS total
+     FROM transactions t
+     WHERE ${incomeVisibility.sql}
+       AND t.type = 'income' AND t.deleted_at IS NULL
+       AND t.status <> 'cancelled'
+       AND t.date BETWEEN ? AND ?`,
+    [...incomeVisibility.params, bounds.start, bounds.end]
+  );
+  const incomeForecast = Number(incomeRows[0].total);
+
   res.json({
     month,
     budgets: rows,
@@ -278,6 +291,8 @@ router.get('/', asyncHandler(async (req, res) => {
       spent_total: Number(spentTotal.toFixed(2)),
       remaining: Number((forecastTotal - spentTotal).toFixed(2)),
       percent: forecastTotal > 0 ? Number(((spentTotal / forecastTotal) * 100).toFixed(2)) : 0,
+      income_forecast: Number(incomeForecast.toFixed(2)),
+      projected_leftover: Number((incomeForecast - forecastTotal).toFixed(2)),
     },
   });
 }));

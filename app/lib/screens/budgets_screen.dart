@@ -254,6 +254,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     final gastoTotal = (totals['spent_total'] as num?)?.toDouble() ?? 0;
     final remaining = (totals['remaining'] as num?)?.toDouble() ?? 0;
     final percent = (totals['percent'] as num?)?.toDouble() ?? 0;
+    final receitaPrevista =
+        (totals['income_forecast'] as num?)?.toDouble() ?? 0;
+    final sobraPrevista =
+        (totals['projected_leftover'] as num?)?.toDouble() ?? 0;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Orçamento')),
@@ -312,6 +316,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                                 cartao,
                                 Colors.deepPurple,
                               ),
+                              _totalLine(
+                                'Receita prevista',
+                                receitaPrevista,
+                                Colors.green.shade700,
+                              ),
                               const Divider(),
                               _totalLine(
                                 'Previsto total',
@@ -328,6 +337,14 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                                 'Restante',
                                 remaining,
                                 Theme.of(context).colorScheme.tertiary,
+                              ),
+                              _totalLine(
+                                'Previsão de sobra (receita − previsto)',
+                                sobraPrevista,
+                                sobraPrevista >= 0
+                                    ? Colors.green.shade700
+                                    : Theme.of(context).colorScheme.error,
+                                bold: true,
                               ),
                               const SizedBox(height: 8),
                               LinearProgressIndicator(

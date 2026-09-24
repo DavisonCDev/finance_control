@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../db');
 const authenticate = require('../middleware/auth');
 const { ensureBudget, ensureBudgetsForRecurring } = require('../services/autoBudget');
-const { generateUpTo } = require('../services/recurringGen');
+const { generateUpTo, horizonDate } = require('../services/recurringGen');
 const { withTransaction } = require('../db');
 const ledger = require('../lib/ledger');
 const router = express.Router();
@@ -58,9 +58,9 @@ router.post('/', async (req, res) => {
     }
 
     // Gera as ocorrencias de uma vez: com data final, todas ate end_date;
-    // sem data final, apenas as que ja venceram. Futuras ficam "a pagar".
+    // sem data final, ate o horizonte de ~3 meses. Futuras ficam "a pagar".
     try {
-      const upTo = end_date || new Date().toISOString().slice(0, 10);
+      const upTo = end_date || horizonDate();
       await withTransaction(conn => generateUpTo(conn, req.userId, rows[0], upTo));
     } catch (genErr) {
       // Nao impede a criacao da recorrencia se a geracao falhar.
