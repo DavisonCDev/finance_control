@@ -24,32 +24,37 @@ async function authenticate(req, res, next) {
   }
 
   try {
-    const [sessions] = await db.query(
-      'SELECT id, revoked_at FROM user_sessions WHERE token_hash = ?',
-      [hashToken(token)]
+    // Uma unica query traz usuario + sessao (LEFT JOIN no token_hash):
+    // com banco remoto, cada query sequencial custa um round-trip inteiro.
+    const [rows] = await db.query(
+      `SELECT u.id, u.name, u.email, u.currency, u.language, u.timezone, u.first_day_of_month, u.date_format,
+              u.theme, u.privacy_mode, u.hide_values, u.plan, u.is_admin, u.two_factor_enabled,
+              u.biometric_enabled, u.auto_lock_minutes, u.pin_hash IS NOT NULL AS has_pin, u.deleted_at,
+              s.id AS session_id, s.revoked_at
+       FROM users u
+       LEFT JOIN user_sessions s ON s.token_hash = ?
+       WHERE u.id = ?`,
+      [hashToken(token), decoded.id]
     );
 
-    // Sessões só passam a existir a partir desta versão; tokens antigos seguem
-    // válidos até expirar, mas qualquer sessão registrada e revogada é bloqueada.
-    if (sessions.length > 0) {
-      if (sessions[0].revoked_at) return res.status(401).json({ error: 'Sessão encerrada.' });
-      await db.query('UPDATE user_sessions SET last_seen_at = NOW() WHERE id = ?', [sessions[0].id]);
-      req.sessionId = sessions[0].id;
-    }
-
-    const [users] = await db.query(
-      `SELECT id, name, email, currency, language, timezone, first_day_of_month, date_format,
-              theme, privacy_mode, hide_values, plan, is_admin, two_factor_enabled,
-              biometric_enabled, auto_lock_minutes, pin_hash IS NOT NULL AS has_pin, deleted_at
-       FROM users WHERE id = ?`,
-      [decoded.id]
-    );
-    if (users.length === 0 || users[0].deleted_at) {
+    if (rows.length === 0 || rows[0].deleted_at) {
       return res.status(401).json({ error: 'Usuário inválido.' });
     }
 
-    req.userId = users[0].id;
-    req.user = users[0];
+    const { session_id: sessionId, revoked_at: revokedAt, ...user } = rows[0];
+
+    // Sessões só passam a existir a partir desta versão; tokens antigos seguem
+    // válidos até expirar, mas qualquer sessão registrada e revogada é bloqueada.
+    if (sessionId) {
+      if (revokedAt) return res.status(401).json({ error: 'Sessão encerrada.' });
+      req.sessionId = sessionId;
+      // Telemetria: last_seen em background, sem custo na resposta.
+      db.query('UPDATE user_sessions SET last_seen_at = NOW() WHERE id = ?', [sessionId])
+        .catch(err => console.error('last_seen:', err.message));
+    }
+
+    req.userId = user.id;
+    req.user = user;
     req.token = token;
     next();
   } catch (err) {

@@ -177,14 +177,21 @@ const COUNT_FROM = `
   LEFT JOIN categories c ON t.category_id = c.id
 `;
 
+// Catch-up de recorrencias tem custo de uma transacao inteira: basta
+// rodar a cada alguns minutos por usuario, nao em toda listagem.
+const lastCatchUp = new Map();
+const CATCH_UP_INTERVAL_MS = 5 * 60 * 1000;
+
 // GET / — listagem filtrada com total e resumo.
 router.get('/', asyncHandler(async (req, res) => {
-  // Catch-up: materializa ocorrencias de recorrencia que ja venceram,
-  // para que aparecam na lista sem acao manual do usuario.
-  try {
-    await withTransaction(conn => generateDue(conn, req.userId));
-  } catch (err) {
-    // Falha na geracao nao impede a listagem.
+  const last = lastCatchUp.get(req.userId) || 0;
+  if (Date.now() - last > CATCH_UP_INTERVAL_MS) {
+    lastCatchUp.set(req.userId, Date.now());
+    try {
+      await withTransaction(conn => generateDue(conn, req.userId));
+    } catch (err) {
+      // Falha na geracao nao impede a listagem.
+    }
   }
 
   const { where, params } = await buildFilters(req);
@@ -193,23 +200,25 @@ router.get('/', asyncHandler(async (req, res) => {
   const order = ORDERS[req.query.order || 'date_desc'];
   if (!order) throw badRequest("Ordenação inválida. Use 'date_desc', 'date_asc', 'amount_desc' ou 'amount_asc'.");
 
-  const [rows] = await db.query(
-    `${ledger.TRANSACTION_SELECT} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
-
-  const [totals] = await db.query(`SELECT COUNT(*) AS total ${COUNT_FROM} WHERE ${where}`, params);
-
-  // Resumo ignora transferências: mover dinheiro entre contas não é receita nem despesa.
-  const [summary] = await db.query(
-    `SELECT
-       COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) AS income,
-       COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense,
-       COUNT(*) AS count
-     ${COUNT_FROM}
-     WHERE ${where} AND t.type <> 'transfer'`,
-    params
-  );
+  // As tres consultas sao independentes: em paralelo economiza dois
+  // round-trips completos ate o banco.
+  const [[rows], [totals], [summary]] = await Promise.all([
+    db.query(
+      `${ledger.TRANSACTION_SELECT} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    ),
+    db.query(`SELECT COUNT(*) AS total ${COUNT_FROM} WHERE ${where}`, params),
+    // Resumo ignora transferências: mover dinheiro entre contas não é receita nem despesa.
+    db.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) AS income,
+         COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense,
+         COUNT(*) AS count
+       ${COUNT_FROM}
+       WHERE ${where} AND t.type <> 'transfer'`,
+      params
+    ),
+  ]);
 
   const income = Number(summary[0]?.income || 0);
   const expense = Number(summary[0]?.expense || 0);
@@ -456,23 +465,26 @@ router.post('/', asyncHandler(async (req, res) => {
 
   const transaction = await withTransaction(conn => ledger.createTransaction(conn, req.userId, payload));
 
-  await gamification.registerActivity(req.userId, transaction.date);
-  await gamification.checkTransactionAchievements(req.userId);
-  await audit(req.userId, 'transaction', transaction.id, 'create', { applied_rules: ruled.appliedRuleIds });
-
-  if (transaction.family_id) {
-    await familyActivity({
-      familyId: transaction.family_id,
-      userId: req.userId,
-      action: 'transaction_created',
-      entity: 'transaction',
-      entityId: transaction.id,
-      description: transaction.description,
-      amount: transaction.amount,
-    });
-  }
-
   res.status(201).json(serialize(transaction));
+
+  // Efeitos nao-criticos em background: auditoria, streak e conquistas nao
+  // precisam segurar a resposta (cada query custa um round-trip ao banco).
+  Promise.all([
+    gamification.registerActivity(req.userId, transaction.date),
+    gamification.checkTransactionAchievements(req.userId),
+    audit(req.userId, 'transaction', transaction.id, 'create', { applied_rules: ruled.appliedRuleIds }),
+    transaction.family_id
+      ? familyActivity({
+          familyId: transaction.family_id,
+          userId: req.userId,
+          action: 'transaction_created',
+          entity: 'transaction',
+          entityId: transaction.id,
+          description: transaction.description,
+          amount: transaction.amount,
+        })
+      : Promise.resolve(),
+  ]).catch(err => console.error('post-commit tx:', err.message));
 }));
 
 // PUT /:id — atualiza revertendo o efeito antigo e aplicando o novo.
@@ -578,15 +590,17 @@ router.put('/:id', asyncHandler(async (req, res) => {
     return updated;
   });
 
-  await audit(req.userId, 'transaction', transaction.id, 'update', { before: existing[0], changes: payload });
   res.json(serialize(transaction));
+  audit(req.userId, 'transaction', transaction.id, 'update', { before: existing[0], changes: payload })
+    .catch(err => console.error('post-commit tx:', err.message));
 }));
 
 // DELETE /:id — remove e reverte os efeitos.
 router.delete('/:id', asyncHandler(async (req, res) => {
   const removed = await withTransaction(conn => ledger.deleteTransaction(conn, req.userId, req.params.id));
-  await audit(req.userId, 'transaction', removed.id, 'delete', removed);
   res.json({ message: 'Lançamento excluído.', id: removed.id });
+  audit(req.userId, 'transaction', removed.id, 'delete', removed)
+    .catch(err => console.error('post-commit tx:', err.message));
 }));
 
 // --- Helpers -----------------------------------------------------------------
@@ -667,59 +681,67 @@ async function assertOwnAccount(userId, accountId) {
  * (ou a uma família visível, no caso de recursos compartilhados).
  */
 async function validateReferences(userId, payload) {
+  // Todos os checks sao independentes: rodam em paralelo sobre conexoes
+  // distintas do pool (cada round-trip ate o banco custa latencia real).
+  const needsAccounts = payload.account_id || payload.transfer_account_id;
+  const [visA, visCC] = await Promise.all([
+    needsAccounts ? scope.visibilityClause(userId, 'a') : null,
+    payload.card_id ? scope.visibilityClause(userId, 'cc') : null,
+  ]);
+
+  const checks = [];
+  const expectOne = (promise, message) =>
+    checks.push(promise.then(([rows]) => {
+      if (rows.length === 0) throw notFound(message);
+    }));
+
   if (payload.account_id) {
-    const visibility = await scope.visibilityClause(userId, 'a');
-    const [rows] = await db.query(
-      `SELECT a.id FROM accounts a WHERE a.id = ? AND ${visibility.sql}`,
-      [payload.account_id, ...visibility.params]
+    expectOne(
+      db.query(`SELECT a.id FROM accounts a WHERE a.id = ? AND ${visA.sql}`, [payload.account_id, ...visA.params]),
+      'Conta não encontrada.'
     );
-    if (rows.length === 0) throw notFound('Conta não encontrada.');
   }
   if (payload.transfer_account_id) {
-    const visibility = await scope.visibilityClause(userId, 'a');
-    const [rows] = await db.query(
-      `SELECT a.id FROM accounts a WHERE a.id = ? AND ${visibility.sql}`,
-      [payload.transfer_account_id, ...visibility.params]
+    expectOne(
+      db.query(`SELECT a.id FROM accounts a WHERE a.id = ? AND ${visA.sql}`, [payload.transfer_account_id, ...visA.params]),
+      'Conta de destino não encontrada.'
     );
-    if (rows.length === 0) throw notFound('Conta de destino não encontrada.');
   }
   if (payload.card_id) {
-    const visibility = await scope.visibilityClause(userId, 'cc');
-    const [rows] = await db.query(
-      `SELECT cc.id FROM credit_cards cc WHERE cc.id = ? AND ${visibility.sql}`,
-      [payload.card_id, ...visibility.params]
+    expectOne(
+      db.query(`SELECT cc.id FROM credit_cards cc WHERE cc.id = ? AND ${visCC.sql}`, [payload.card_id, ...visCC.params]),
+      'Cartão não encontrado.'
     );
-    if (rows.length === 0) throw notFound('Cartão não encontrado.');
   }
   if (payload.category_id) {
-    const [rows] = await db.query(
-      'SELECT id FROM categories WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
-      [payload.category_id, userId]
+    expectOne(
+      db.query('SELECT id FROM categories WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [payload.category_id, userId]),
+      'Categoria não encontrada.'
     );
-    if (rows.length === 0) throw notFound('Categoria não encontrada.');
   }
   if (payload.cost_center_id) {
-    const [rows] = await db.query(
-      'SELECT id FROM cost_centers WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
-      [payload.cost_center_id, userId]
+    expectOne(
+      db.query('SELECT id FROM cost_centers WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [payload.cost_center_id, userId]),
+      'Centro de custo não encontrado.'
     );
-    if (rows.length === 0) throw notFound('Centro de custo não encontrado.');
   }
   if (payload.contact_id) {
-    const [rows] = await db.query(
-      'SELECT id FROM contacts WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
-      [payload.contact_id, userId]
+    expectOne(
+      db.query('SELECT id FROM contacts WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [payload.contact_id, userId]),
+      'Contato não encontrado.'
     );
-    if (rows.length === 0) throw notFound('Contato não encontrado.');
   }
   if (Array.isArray(payload.tagIds) && payload.tagIds.length > 0) {
     const placeholders = payload.tagIds.map(() => '?').join(', ');
-    const [rows] = await db.query(
-      `SELECT id FROM tags WHERE id IN (${placeholders}) AND user_id = ?`,
-      [...payload.tagIds, userId]
+    checks.push(
+      db.query(`SELECT id FROM tags WHERE id IN (${placeholders}) AND user_id = ?`, [...payload.tagIds, userId])
+        .then(([rows]) => {
+          if (rows.length !== payload.tagIds.length) throw notFound('Uma ou mais tags não foram encontradas.');
+        })
     );
-    if (rows.length !== payload.tagIds.length) throw notFound('Uma ou mais tags não foram encontradas.');
   }
+
+  await Promise.all(checks);
 }
 
 module.exports = router;

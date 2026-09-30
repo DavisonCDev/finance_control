@@ -14,6 +14,11 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  // Banco remoto (Railway -> Oracle): mantem as conexoes do pool vivas para
+  // que requests nao paguem um novo handshake de ~500ms apos periodo ocioso.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  connectTimeout: 15000,
 });
 
 // Executa uma função dentro de uma transação, liberando a conexão sempre.

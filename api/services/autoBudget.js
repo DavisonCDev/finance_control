@@ -6,32 +6,29 @@ async function ensureBudget(userId, categoryId, month, amount, conn = null) {
   if (Number.isNaN(parsedAmount)) return;
 
   const q = conn || db;
-  const [existing] = await q.query(
-    'SELECT id, amount FROM budgets WHERE user_id = ? AND category_id = ? AND budget_month = ?',
-    [userId, categoryId, month]
-  );
-
-  if (existing.length === 0) {
-    if (parsedAmount <= 0) return;
-    await q.query(
-      `INSERT INTO budgets (user_id, category_id, budget_month, amount, alert_threshold)
-       VALUES (?, ?, ?, ?, 80)`,
-      [userId, categoryId, month, parsedAmount]
+  if (parsedAmount <= 0) {
+    // Subtracao: ajusta a linha existente e limpa se zerar/negativar.
+    const [result] = await q.query(
+      'UPDATE budgets SET amount = amount + ? WHERE user_id = ? AND category_id = ? AND budget_month = ?',
+      [parsedAmount, userId, categoryId, month]
     );
-  } else {
-    const nextAmount = Number(existing[0].amount) + parsedAmount;
-    if (nextAmount <= 0) {
+    if (result.affectedRows > 0) {
       await q.query(
-        'DELETE FROM budgets WHERE id = ?',
-        [existing[0].id]
-      );
-    } else {
-      await q.query(
-        'UPDATE budgets SET amount = ? WHERE id = ?',
-        [nextAmount, existing[0].id]
+        'DELETE FROM budgets WHERE user_id = ? AND category_id = ? AND budget_month = ? AND amount <= 0',
+        [userId, categoryId, month]
       );
     }
+    return;
   }
+
+  // Upsert apoiado na chave unica (user_id, category_id, budget_month):
+  // uma unica query tanto cria quanto acumula a previsao.
+  await q.query(
+    `INSERT INTO budgets (user_id, category_id, budget_month, amount, alert_threshold)
+     VALUES (?, ?, ?, ?, 80)
+     ON DUPLICATE KEY UPDATE amount = amount + VALUES(amount)`,
+    [userId, categoryId, month, parsedAmount]
+  );
 }
 
 async function ensureBudgetForTransaction(userId, tx, conn = null) {

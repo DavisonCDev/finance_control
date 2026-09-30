@@ -34,31 +34,42 @@ async function ensureInvoice(conn, userId, cardId, date) {
      VALUES (?, ?, ?, ?, ?)`,
     [userId, cardId, period.referenceMonth, period.closingDate, period.dueDate]
   );
-  const [rows] = await conn.query('SELECT * FROM card_invoices WHERE id = ?', [result.insertId]);
-  return rows[0];
+  return {
+    id: result.insertId,
+    user_id: userId,
+    card_id: cardId,
+    reference_month: period.referenceMonth,
+    closing_date: period.closingDate,
+    due_date: period.dueDate,
+    total_amount: 0,
+    paid_amount: 0,
+    status: 'open',
+  };
 }
 
-async function refreshInvoiceTotal(conn, invoiceId) {
+// Recalcula total e status de uma ou mais faturas numa única query.
+async function refreshInvoiceTotal(conn, invoiceIds) {
+  const ids = Array.isArray(invoiceIds) ? invoiceIds : [invoiceIds];
+  const valid = ids.filter(Boolean);
+  if (valid.length === 0) return;
+  const placeholders = valid.map(() => '?').join(', ');
   await conn.query(
     `UPDATE card_invoices i
-     SET i.total_amount = COALESCE((
-       SELECT SUM(CASE WHEN t.is_refund THEN -t.amount ELSE t.amount END)
-       FROM transactions t
-       WHERE t.invoice_id = i.id AND t.deleted_at IS NULL
-     ), 0)
-     WHERE i.id = ?`,
-    [invoiceId]
-  );
-  await conn.query(
-    `UPDATE card_invoices
-     SET status = CASE
-       WHEN paid_amount >= total_amount AND total_amount > 0 THEN 'paid'
-       WHEN paid_amount > 0 THEN 'partial'
-       WHEN closing_date <= CURDATE() THEN 'closed'
-       ELSE 'open'
-     END
-     WHERE id = ?`,
-    [invoiceId]
+     LEFT JOIN (
+       SELECT invoice_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) AS total
+       FROM transactions
+       WHERE invoice_id IN (${placeholders}) AND deleted_at IS NULL
+       GROUP BY invoice_id
+     ) t ON t.invoice_id = i.id
+     SET i.total_amount = COALESCE(t.total, 0),
+         i.status = CASE
+           WHEN i.paid_amount >= COALESCE(t.total, 0) AND COALESCE(t.total, 0) > 0 THEN 'paid'
+           WHEN i.paid_amount > 0 THEN 'partial'
+           WHEN i.closing_date <= CURDATE() THEN 'closed'
+           ELSE 'open'
+         END
+     WHERE i.id IN (${placeholders})`,
+    [...valid, ...valid]
   );
 }
 
@@ -71,12 +82,16 @@ async function applyEffect(conn, tx, direction) {
   const amount = Number(tx.amount) * direction;
 
   if (tx.type === 'transfer') {
-    if (tx.account_id) {
-      await conn.query('UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?', [amount, tx.account_id]);
-    }
-    if (tx.transfer_account_id) {
-      await conn.query('UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?', [amount, tx.transfer_account_id]);
-    }
+    const ids = [tx.account_id, tx.transfer_account_id].filter(Boolean);
+    if (ids.length === 0) return;
+    await conn.query(
+      `UPDATE accounts SET current_balance = current_balance + CASE
+         WHEN id = ? THEN -?
+         WHEN id = ? THEN ?
+         ELSE 0 END
+       WHERE id IN (?, ?)`,
+      [tx.account_id, amount, tx.transfer_account_id, amount, tx.account_id, tx.transfer_account_id]
+    );
     return;
   }
 
@@ -186,8 +201,12 @@ async function createTransaction(conn, userId, payload) {
 
   const transactionId = result.insertId;
 
-  for (const tagId of tagIds.filter(Boolean)) {
-    await conn.query('INSERT IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)', [transactionId, tagId]);
+  const validTags = tagIds.filter(Boolean);
+  if (validTags.length > 0) {
+    await conn.query(
+      `INSERT IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES ${validTags.map(() => '(?, ?)').join(', ')}`,
+      validTags.flatMap(tagId => [transactionId, tagId])
+    );
   }
 
   if (status !== 'cancelled' && status !== 'scheduled' && normalizedPaid) {
@@ -223,7 +242,8 @@ async function deleteTransaction(conn, userId, transactionId) {
   const tx = rows[0];
   await conn.query('DELETE FROM transactions WHERE id = ?', [transactionId]);
 
-  if (tx.status !== 'cancelled' && tx.status !== 'scheduled' && tx.is_paid) {
+  const reverted = tx.status !== 'cancelled' && tx.status !== 'scheduled' && tx.is_paid;
+  if (reverted) {
     await applyEffect(conn, tx, -1);
   }
 
@@ -234,7 +254,11 @@ async function deleteTransaction(conn, userId, transactionId) {
     }
   }
 
-  if (tx.invoice_id) await refreshInvoiceTotal(conn, tx.invoice_id);
+  // applyEffect ja recalcula a fatura quando a compra estava paga;
+  // aqui cobre os demais casos sem rodar duas vezes.
+  if (tx.invoice_id && !(reverted && tx.card_id)) {
+    await refreshInvoiceTotal(conn, tx.invoice_id);
+  }
   if (tx.installment_id) {
     await conn.query(
       'UPDATE installment_items SET paid = FALSE, paid_at = NULL, transaction_id = NULL WHERE transaction_id = ?',
@@ -322,8 +346,12 @@ async function updateTransaction(conn, userId, transactionId, payload) {
 
   if (Array.isArray(payload.tagIds)) {
     await conn.query('DELETE FROM transaction_tags WHERE transaction_id = ?', [transactionId]);
-    for (const tagId of payload.tagIds.filter(Boolean)) {
-      await conn.query('INSERT IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)', [transactionId, tagId]);
+    const validTags = payload.tagIds.filter(Boolean);
+    if (validTags.length > 0) {
+      await conn.query(
+        `INSERT IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES ${validTags.map(() => '(?, ?)').join(', ')}`,
+        validTags.flatMap(tagId => [transactionId, tagId])
+      );
     }
   }
 
@@ -332,8 +360,11 @@ async function updateTransaction(conn, userId, transactionId, payload) {
   }
   // Sempre recalcula a fatura de destino: compra no cartao tem is_paid=false,
   // entao applyEffect nao roda e a fatura precisa do refresh explicito.
-  if (invoiceId) await refreshInvoiceTotal(conn, invoiceId);
-  if (before.invoice_id && before.invoice_id !== invoiceId) await refreshInvoiceTotal(conn, before.invoice_id);
+  // Uma unica query cobre fatura antiga e nova quando a compra muda de fatura.
+  const invoicesToRefresh = [invoiceId, before.invoice_id].filter(Boolean);
+  if (invoicesToRefresh.length > 0) {
+    await refreshInvoiceTotal(conn, [...new Set(invoicesToRefresh)]);
+  }
 
   // Ajuste de previsao: desfaz a contribuicao anterior e aplica a nova.
   // Transacoes de recorrencia e de cartao nao contribuem para a previsao.
