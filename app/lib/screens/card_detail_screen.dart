@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../models/transaction.dart';
 import 'card_invoices_screen.dart';
+import 'new_transaction_screen.dart';
 import '../utils/formatters.dart';
 
 class CardDetailScreen extends StatefulWidget {
@@ -80,6 +82,20 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         loading = false;
       });
     }
+  }
+
+  // Abre a compra para edicao/exclusao; ao voltar, recarrega a fatura
+  // (o backend ja recalcula total, limite e fatura correta pela nova data).
+  Future<void> _editPurchase(dynamic t) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => NewTransactionScreen(
+          transactionToEdit:
+              Transaction.fromJson(Map<String, dynamic>.from(t as Map)),
+        ),
+      ),
+    );
+    if (changed == true) _load();
   }
 
   int _daysUntil(String? dateStr) {
@@ -400,6 +416,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 (t) => ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
+                  onTap: () => _editPurchase(t),
                   leading: Icon(
                     t['is_refund'] == 1 ? Icons.undo : Icons.shopping_bag,
                     size: 20,
@@ -417,9 +434,17 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                       fmtDate(t['date']),
                       if (t['installment_number'] != null)
                         'Parcela ${t['installment_number']}',
-                    ].join(' • '),
+                      t['category_name']?.toString() ?? '',
+                    ].where((s) => s.isNotEmpty).join(' • '),
                   ),
-                  trailing: Text(_money(t['amount'])),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_money(t['amount'])),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right, size: 18),
+                    ],
+                  ),
                 ),
               ),
             ] else

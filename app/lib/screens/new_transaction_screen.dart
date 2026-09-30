@@ -180,6 +180,40 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
           body['transfer_account_id'] = selectedTransferAccountId;
         }
       }
+      // Compra parcelada: pergunta se a edicao vale so para esta parcela
+      // ou para todas as parcelas do plano.
+      final tx = widget.transactionToEdit!;
+      if (tx.installmentId != null) {
+        final scope = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Editar parcela'),
+            content: const Text(
+              'Esta compra é parcelada. Aplicar a edição somente '
+              'nesta parcela ou em todas as parcelas?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'all'),
+                child: const Text('Todas as parcelas'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, 'one'),
+                child: const Text('Somente esta'),
+              ),
+            ],
+          ),
+        );
+        if (scope == null) {
+          if (mounted) setState(() => saving = false);
+          return;
+        }
+        if (scope == 'all') body['apply_to_installment'] = true;
+      }
       res = await ApiService.put(
           '/transactions/${widget.transactionToEdit!.id}', body);
     } else if (isRecurring && type != 'transfer') {
@@ -232,16 +266,23 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
 
   Future<void> _delete() async {
     final tx = widget.transactionToEdit!;
-    // Transacao gerada por recorrencia: pergunta se apaga so esta ou a serie.
+    // Recorrencia ou parcela: pergunta se apaga so esta ou a serie toda.
     final recurringId = tx.recurringId;
+    final installmentId = tx.installmentId;
+    final seriesLabel =
+        recurringId != null ? 'recorrência' : 'parcelamento';
+    final seriesButton =
+        recurringId != null ? 'Todas da série' : 'Todas as parcelas';
+    final singleButton =
+        recurringId != null ? 'Somente esta' : 'Somente esta parcela';
     final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir transação?'),
         content: Text(
-          recurringId != null
-              ? 'Esta despesa faz parte de uma recorrência. '
-                  'Deseja excluir somente esta ou todas as da série?'
+          recurringId != null || installmentId != null
+              ? 'Esta despesa faz parte de um $seriesLabel. '
+                  'Deseja excluir $singleButton ou $seriesButton?'
               : 'O saldo e as previsões serão atualizados.',
         ),
         actions: [
@@ -249,22 +290,30 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
-          if (recurringId != null)
+          if (recurringId != null || installmentId != null)
             TextButton(
               onPressed: () => Navigator.pop(context, 'all'),
-              child: const Text('Todas da série'),
+              child: Text(seriesButton),
             ),
           FilledButton(
             onPressed: () => Navigator.pop(context, 'one'),
-            child: Text(recurringId != null ? 'Somente esta' : 'Excluir'),
+            child: Text(
+              recurringId != null || installmentId != null
+                  ? singleButton
+                  : 'Excluir',
+            ),
           ),
         ],
       ),
     );
     if (choice == null) return;
-    final res = choice == 'all'
-        ? await ApiService.delete('/recurring/$recurringId')
-        : await ApiService.delete('/transactions/${tx.id}');
+    final res = switch (choice) {
+      'all' when recurringId != null =>
+        await ApiService.delete('/recurring/$recurringId'),
+      'all' when installmentId != null =>
+        await ApiService.delete('/cards/installments/$installmentId'),
+      _ => await ApiService.delete('/transactions/${tx.id}'),
+    };
     if (!mounted) return;
     if (res.statusCode == 200) {
       Navigator.pop(context, true);
@@ -495,24 +544,26 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                         onChanged: (v) => setState(() => selectedCardId = v),
                       ),
                       const SizedBox(height: 8),
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(
-                            value: false,
-                            label: Text('À vista'),
-                            icon: Icon(Icons.payments_outlined),
-                          ),
-                          ButtonSegment(
-                            value: true,
-                            label: Text('Parcelado'),
-                            icon: Icon(Icons.view_week_outlined),
-                          ),
-                        ],
-                        selected: {payInstallments},
-                        onSelectionChanged: (s) =>
-                            setState(() => payInstallments = s.first),
-                      ),
-                      if (payInstallments) ...[
+                      if (!isEditing) ...[
+                        SegmentedButton<bool>(
+                          segments: const [
+                            ButtonSegment(
+                              value: false,
+                              label: Text('À vista'),
+                              icon: Icon(Icons.payments_outlined),
+                            ),
+                            ButtonSegment(
+                              value: true,
+                              label: Text('Parcelado'),
+                              icon: Icon(Icons.view_week_outlined),
+                            ),
+                          ],
+                          selected: {payInstallments},
+                          onSelectionChanged: (s) =>
+                              setState(() => payInstallments = s.first),
+                        ),
+                      ],
+                      if (payInstallments && !isEditing) ...[
                         const SizedBox(height: 8),
                         TextField(
                           controller: installmentsController,

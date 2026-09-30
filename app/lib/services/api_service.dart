@@ -3,12 +3,18 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static String baseUrl = 'http://129.148.60.52:3000';
+  static String baseUrl = 'https://finance-control-production-f398.up.railway.app';
 
   static Future<void> initBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('apiBaseUrl');
-    if (saved != null && saved.isNotEmpty) baseUrl = saved;
+    if (saved != null && saved.isNotEmpty) {
+      baseUrl = saved;
+      // Migra a URL antiga salva no aparelho para o backend na Railway.
+      if (saved.contains('129.148.60.52')) {
+        await setBaseUrl('https://finance-control-production-f398.up.railway.app');
+      }
+    }
   }
 
   static Future<void> setBaseUrl(String url) async {

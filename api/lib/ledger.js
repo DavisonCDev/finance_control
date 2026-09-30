@@ -330,6 +330,9 @@ async function updateTransaction(conn, userId, transactionId, payload) {
   if (merged.status !== 'cancelled' && merged.status !== 'scheduled' && merged.is_paid) {
     await applyEffect(conn, { ...merged, invoice_id: invoiceId }, 1);
   }
+  // Sempre recalcula a fatura de destino: compra no cartao tem is_paid=false,
+  // entao applyEffect nao roda e a fatura precisa do refresh explicito.
+  if (invoiceId) await refreshInvoiceTotal(conn, invoiceId);
   if (before.invoice_id && before.invoice_id !== invoiceId) await refreshInvoiceTotal(conn, before.invoice_id);
 
   // Ajuste de previsao: desfaz a contribuicao anterior e aplica a nova.

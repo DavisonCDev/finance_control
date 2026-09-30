@@ -323,7 +323,8 @@ router.get('/:id/invoices/current', asyncHandler(async (req, res) => {
   });
 
   const [transactions] = await db.query(
-    `SELECT t.id, t.date, t.amount, t.description, t.is_refund, t.installment_number, t.installment_id,
+    `SELECT t.id, t.type, t.date, t.amount, t.description, t.is_refund, t.installment_number, t.installment_id,
+            t.card_id, t.category_id, t.account_id, t.is_paid, t.recurring_id,
             CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END AS category_name
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
@@ -346,8 +347,9 @@ router.get('/:id/invoices/:reference_month', asyncHandler(async (req, res) => {
   const invoice = rows[0];
 
   const [transactions] = await db.query(
-    `SELECT t.id, t.date, t.amount, t.description, t.notes, t.is_refund, t.installment_id,
+    `SELECT t.id, t.type, t.date, t.amount, t.description, t.notes, t.is_refund, t.installment_id,
             t.installment_number, t.source,
+            t.card_id, t.category_id, t.account_id, t.is_paid, t.recurring_id,
             CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END AS category_name,
             c.color AS category_color
      FROM transactions t
@@ -567,6 +569,32 @@ router.post('/:id/purchases', asyncHandler(async (req, res) => {
     message: count > 1 ? `Compra parcelada em ${count}x lançada no cartão.` : 'Compra lançada no cartão.',
     ...result,
   });
+}));
+
+// DELETE /installments/:installmentId — apaga o parcelamento inteiro: as
+// transacoes de cada parcela (recalculando as faturas), os itens e o plano.
+router.delete('/installments/:installmentId', asyncHandler(async (req, res) => {
+  const installmentId = Number(req.params.installmentId);
+  const [rows] = await db.query(
+    'SELECT * FROM installments WHERE id = ? AND user_id = ?',
+    [installmentId, req.userId]
+  );
+  if (rows.length === 0) throw fail('Parcelamento não encontrado.', 404);
+
+  await withTransaction(async conn => {
+    const [txs] = await conn.query(
+      'SELECT id FROM transactions WHERE installment_id = ? AND deleted_at IS NULL',
+      [installmentId]
+    );
+    for (const t of txs) {
+      await ledger.deleteTransaction(conn, req.userId, t.id);
+    }
+    await conn.query('DELETE FROM installment_items WHERE installment_id = ?', [installmentId]);
+    await conn.query('DELETE FROM installments WHERE id = ?', [installmentId]);
+  });
+
+  await audit(req.userId, 'installment', installmentId, 'delete', rows[0]);
+  res.json({ message: 'Parcelamento e parcelas removidos.' });
 }));
 
 router.post('/:id/refunds', asyncHandler(async (req, res) => {

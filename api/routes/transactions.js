@@ -504,7 +504,79 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
   await validateReferences(req.userId, { ...existing[0], ...payload });
 
-  const transaction = await withTransaction(conn => ledger.updateTransaction(conn, req.userId, req.params.id, payload));
+  const applyToInstallment = body.apply_to_installment === true;
+  const transaction = await withTransaction(async conn => {
+    const updated = await ledger.updateTransaction(conn, req.userId, req.params.id, payload);
+
+    // Propaga a edicao para as outras parcelas do mesmo parcelamento:
+    // descrição/valor/categoria/cartão — a data de cada parcela fica intacta,
+    // pois ela define em qual fatura a parcela cai.
+    if (applyToInstallment && existing[0].installment_id) {
+      const installmentId = existing[0].installment_id;
+      const [siblings] = await conn.query(
+        `SELECT id, installment_number, date FROM transactions
+         WHERE installment_id = ? AND id <> ? AND deleted_at IS NULL`,
+        [installmentId, req.params.id]
+      );
+      const [countRows] = await conn.query(
+        'SELECT COUNT(*) AS total FROM transactions WHERE installment_id = ? AND deleted_at IS NULL',
+        [installmentId]
+      );
+      const total = Number(countRows[0].total);
+      const baseDesc = payload.description === undefined
+        ? null
+        : String(payload.description || '').replace(/\s*\(\d+\/\d+\)\s*$/, '');
+
+      // Se a data mudou, desloca todas as parcelas pelo mesmo delta,
+      // mantendo o espacamento original entre elas.
+      let deltaDays = null;
+      if (payload.date !== undefined) {
+        const ms =
+          Date.parse(String(payload.date).slice(0, 10)) -
+          Date.parse(String(existing[0].date).slice(0, 10));
+        deltaDays = Math.round(ms / 86400000);
+      }
+
+      for (const s of siblings) {
+        const siblingPayload = {};
+        if (payload.category_id !== undefined) siblingPayload.category_id = payload.category_id;
+        if (payload.card_id !== undefined) siblingPayload.card_id = payload.card_id;
+        if (payload.amount !== undefined) siblingPayload.amount = payload.amount;
+        if (deltaDays !== null && deltaDays !== 0) {
+          siblingPayload.date = dates.addDays(dates.toIsoDate(s.date), deltaDays);
+        }
+        if (baseDesc !== null) {
+          siblingPayload.description = s.installment_number
+            ? `${baseDesc} (${s.installment_number}/${total})`
+            : baseDesc;
+        }
+        if (Object.keys(siblingPayload).length > 0) {
+          await ledger.updateTransaction(conn, req.userId, s.id, siblingPayload);
+        }
+      }
+
+      // Mantem o plano coerente com as parcelas atualizadas.
+      await conn.query(
+        `UPDATE installment_items ii
+         JOIN transactions t ON t.id = ii.transaction_id
+         SET ii.amount = t.amount, ii.due_date = t.date
+         WHERE ii.installment_id = ? AND t.deleted_at IS NULL`,
+        [installmentId]
+      );
+      await conn.query(
+        `UPDATE installments i SET
+           i.total_amount = (SELECT COALESCE(SUM(ii.amount), 0) FROM installment_items ii WHERE ii.installment_id = i.id AND ii.cancelled = FALSE),
+           i.amount = (SELECT COALESCE(MIN(ii.amount), 0) FROM installment_items ii WHERE ii.installment_id = i.id AND ii.cancelled = FALSE)
+           ${deltaDays !== null && deltaDays !== 0 ? ', i.purchase_date = DATE_ADD(i.purchase_date, INTERVAL ? DAY), i.start_date = DATE_ADD(i.start_date, INTERVAL ? DAY)' : ''}
+         WHERE i.id = ?`,
+        deltaDays !== null && deltaDays !== 0
+          ? [deltaDays, deltaDays, installmentId]
+          : [installmentId]
+      );
+    }
+
+    return updated;
+  });
 
   await audit(req.userId, 'transaction', transaction.id, 'update', { before: existing[0], changes: payload });
   res.json(serialize(transaction));

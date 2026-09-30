@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
+import '../models/transaction.dart';
+import 'new_transaction_screen.dart';
 import '../utils/formatters.dart';
 
 class CardInvoicesScreen extends StatefulWidget {
@@ -173,6 +175,19 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
     );
   }
 
+  // Abre a compra para edicao/exclusao e recarrega as faturas ao voltar.
+  Future<void> _editPurchase(dynamic t) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => NewTransactionScreen(
+          transactionToEdit:
+              Transaction.fromJson(Map<String, dynamic>.from(t as Map)),
+        ),
+      ),
+    );
+    if (changed == true) _load();
+  }
+
   Widget _buildInvoiceDetail(Map<String, dynamic> data) {
     final transactions = data['transactions'] as List? ?? [];
     final remaining = data['remaining'] ?? data['total_amount'] ?? 0.0;
@@ -196,6 +211,7 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
               children: transactions
                   .map(
                     (t) => ListTile(
+                      onTap: () => _editPurchase(t),
                       leading: Icon(
                         Icons.shopping_bag,
                         color: t['is_refund'] == 1
@@ -206,8 +222,13 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
                         t['description'] ?? t['category_name'] ?? 'Compra',
                       ),
                       subtitle: Text(fmtDate(t['date'])),
-                      trailing: Text(
-                        'R\$ ${fmtMoney((t['amount'] ?? 0))}',
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('R\$ ${fmtMoney((t['amount'] ?? 0))}'),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.chevron_right, size: 18),
+                        ],
                       ),
                     ),
                   )
