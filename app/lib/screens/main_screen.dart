@@ -37,7 +37,6 @@ class _MainScreenState extends State<MainScreen> {
 
   void _setIndex(int i) => setState(() => index = i);
 
-  // A tela atual e recriada sempre que o indice muda.
   Widget _buildBody() => _items[index].builder();
 
   @override
@@ -89,9 +88,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildDesktop() {
-    return Row(
-      children: [
-        Drawer(
+    return Scaffold(
+      body: Row(
+        children: [
+          Drawer(
           elevation: 0,
           child: SafeArea(
             child: Column(
@@ -137,12 +137,13 @@ class _MainScreenState extends State<MainScreen> {
                   ),
                 ),
               ],
+              ),
             ),
           ),
-        ),
-        const VerticalDivider(thickness: 1, width: 1),
-        Expanded(child: _buildBody()),
-      ],
+          const VerticalDivider(thickness: 1, width: 1),
+          Expanded(child: _buildBody()),
+        ],
+      ),
     );
   }
 }

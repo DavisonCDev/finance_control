@@ -346,7 +346,9 @@ router.post('/', asyncHandler(async (req, res) => {
 
   if (!name || !String(name).trim()) throw badRequest('Nome do investimento é obrigatório.');
   if (!type || !TYPES.includes(type)) throw badRequest(`Tipo inválido. Use: ${TYPES.join(', ')}.`);
-  const invested = positiveAmount(invested_amount, 'Valor investido');
+  // Caixinhas podem nascer zeradas — o primeiro aporte vem depois via /movements.
+  const invested = invested_amount === undefined || invested_amount === null ? 0 : Number(invested_amount);
+  if (!Number.isFinite(invested) || invested < 0) throw badRequest('Valor investido inválido.');
   const current = current_amount === undefined || current_amount === null ? invested : Number(current_amount);
   if (!Number.isFinite(current) || current < 0) throw badRequest('Valor atual inválido.');
 
@@ -379,7 +381,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
     let transactionId = null;
     // Aporte sai da conta somente quando o usuário pede explicitamente.
-    if (account && debit_account === true) {
+    if (account && debit_account === true && invested > 0) {
       const transaction = await ledger.createTransaction(conn, req.userId, {
         account_id: account.id,
         type: 'expense',
@@ -394,11 +396,13 @@ router.post('/', asyncHandler(async (req, res) => {
       transactionId = transaction.id;
     }
 
-    await conn.query(
-      `INSERT INTO investment_movements (investment_id, kind, amount, quantity, date, transaction_id, notes)
-       VALUES (?, 'contribution', ?, ?, ?, ?, ?)`,
-      [investmentId, invested, quantity === undefined || quantity === null ? null : Number(quantity), purchase, transactionId, 'Aporte inicial']
-    );
+    if (invested > 0) {
+      await conn.query(
+        `INSERT INTO investment_movements (investment_id, kind, amount, quantity, date, transaction_id, notes)
+         VALUES (?, 'contribution', ?, ?, ?, ?, ?)`,
+        [investmentId, invested, quantity === undefined || quantity === null ? null : Number(quantity), purchase, transactionId, 'Aporte inicial']
+      );
+    }
 
     // Valor atual diferente do investido nasce como marcação a mercado, para o
     // histórico continuar reproduzindo exatamente os totais gravados.

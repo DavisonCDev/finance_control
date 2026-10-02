@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:table_calendar/table_calendar.dart';
 import '../models/account.dart';
 import '../models/transaction.dart';
 import '../services/api_service.dart';
@@ -19,13 +18,19 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Account> accounts = [];
   List<Transaction> transactions = [];
   List<dynamic> cardInvoices = [];
-  List<dynamic> recurring = [];
   bool loading = true;
   DateTime focusedDay = DateTime.now();
-  DateTime selectedDay = DateTime.now();
 
   String get _month =>
       '${focusedDay.year}-${focusedDay.month.toString().padLeft(2, '0')}';
+
+  void _changeMonth(int delta) {
+    setState(() {
+      focusedDay = DateTime(focusedDay.year, focusedDay.month + delta);
+      loading = true;
+    });
+    _loadData();
+  }
 
   @override
   void initState() {
@@ -35,12 +40,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     try {
-      final [accountsRes, transactionsRes, budgetsRes, recurringRes] =
-          await Future.wait([
+      final [accountsRes, transactionsRes, budgetsRes] = await Future.wait([
         ApiService.get('/accounts'),
         ApiService.get('/transactions?month=$_month&limit=500'),
         ApiService.get('/budgets?month=$_month'),
-        ApiService.get('/recurring'),
       ]);
 
       if (accountsRes.statusCode == 401) {
@@ -64,9 +67,6 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
         final bData = ApiService.decode(budgetsRes) as Map<String, dynamic>;
         cardInvoices = bData['card_invoices'] as List? ?? [];
-        recurring = ApiService.decode(recurringRes) is List
-            ? ApiService.decode(recurringRes) as List
-            : [];
         loading = false;
       });
     } catch (e) {
@@ -74,10 +74,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Saldo total: poupança e contas de investimento ficam de fora
-  // (aparecem na tela de Investimentos).
+  // Saldo em contas: poupança e investimentos ficam de fora (tela de
+  // Investimentos) e carteira/dinheiro aparece separada no card próprio.
   double get totalBalance => accounts
-      .where((a) => a.type != 'savings' && a.type != 'investment')
+      .where((a) => a.type != 'savings' && a.type != 'investment' && a.type != 'cash')
+      .fold(0.0, (sum, a) => sum + a.currentBalance);
+
+  // Dinheiro em carteira (tipo cash): exibido separado do saldo em contas.
+  double get walletBalance => accounts
+      .where((a) => a.type == 'cash')
       .fold(0.0, (sum, a) => sum + a.currentBalance);
 
   double get monthlyExpensePaid => transactions
@@ -90,102 +95,6 @@ class _HomeScreenState extends State<HomeScreen> {
         0.0,
         (sum, i) => sum + ((i['total_amount'] as num?)?.toDouble() ?? 0),
       );
-
-  // Marcadores do calendario: despesas nao pagas + faturas com vencimento.
-  Map<DateTime, List<Map<String, dynamic>>> get _events {
-    final map = <DateTime, List<Map<String, dynamic>>>{};
-    void add(DateTime d, Map<String, dynamic> item) {
-      final key = DateTime(d.year, d.month, d.day);
-      map.putIfAbsent(key, () => []).add(item);
-    }
-
-    for (final t in transactions) {
-      if (t.isExpense && !t.isPaid && t.cardId == null) {
-        add(t.date, {
-          'label': t.description ?? t.categoryName ?? 'Despesa',
-          'amount': t.amount,
-          'kind': 'expense',
-        });
-      }
-    }
-    for (final inv in cardInvoices) {
-      if (inv['due_date'] == null) continue;
-      final d = DateTime.tryParse('${inv['due_date']}'.substring(0, 10));
-      if (d == null) continue;
-      add(d, {
-        'label': 'Fatura ${inv['card_name'] ?? ''}',
-        'amount': (inv['total_amount'] as num?)?.toDouble() ?? 0,
-        'kind': 'invoice',
-        'paid': inv['status'] == 'paid',
-      });
-    }
-    for (final r in recurring) {
-      if (r['type'] != 'expense') continue;
-      for (final d in _occurrencesInMonth(r)) {
-        add(d, {
-          'label': r['description'] ?? r['category_name'] ?? 'Despesa recorrente',
-          'amount': (r['amount'] as num?)?.toDouble() ?? 0,
-          'kind': 'recurring',
-        });
-      }
-    }
-    return map;
-  }
-
-  // Dias do mes em foco em que uma recorrencia acontece.
-  List<DateTime> _occurrencesInMonth(dynamic r) {
-    final start = DateTime.tryParse('${r['start_date']}'.substring(0, 10));
-    if (start == null) return [];
-    final end = r['end_date'] != null
-        ? DateTime.tryParse('${r['end_date']}'.substring(0, 10))
-        : null;
-    final year = focusedDay.year;
-    final month = focusedDay.month;
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final out = <DateTime>[];
-
-    bool inRange(DateTime d) =>
-        !d.isBefore(DateTime(start.year, start.month, start.day)) &&
-        (end == null ||
-            !d.isAfter(DateTime(end.year, end.month, end.day)));
-
-    switch ('${r['frequency']}') {
-      case 'monthly':
-        final d = DateTime(
-          year,
-          month,
-          start.day > daysInMonth ? daysInMonth : start.day,
-        );
-        if (inRange(d)) out.add(d);
-      case 'weekly':
-        var d = DateTime(year, month, 1);
-        while (d.weekday != start.weekday && d.month == month) {
-          d = d.add(const Duration(days: 1));
-        }
-        while (d.month == month) {
-          if (inRange(d)) out.add(d);
-          d = d.add(const Duration(days: 7));
-        }
-      case 'yearly':
-        if (start.month == month) {
-          final d = DateTime(
-            year,
-            month,
-            start.day > daysInMonth ? daysInMonth : start.day,
-          );
-          if (inRange(d)) out.add(d);
-        }
-      case 'daily':
-        for (var day = 1; day <= daysInMonth; day++) {
-          final d = DateTime(year, month, day);
-          if (inRange(d)) out.add(d);
-        }
-    }
-    return out;
-  }
-
-  List<Map<String, dynamic>> _eventsFor(DateTime day) =>
-      _events[DateTime(day.year, day.month, day.day)] ?? [];
 
   // Despesas pagas por dia do mes (para o grafico).
   Map<int, double> get _dailyExpenses {
@@ -231,60 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (changed == true) _loadData();
   }
 
-  void _showDayDetails(DateTime day) {
-    final items = _eventsFor(day);
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                fmtDate(day),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              if (items.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Text('Nada a pagar neste dia.'),
-                )
-              else
-                ...items.map(
-                  (e) => ListTile(
-                    dense: true,
-                    leading: Icon(
-                      e['kind'] == 'invoice'
-                          ? Icons.credit_card
-                          : e['kind'] == 'recurring'
-                              ? Icons.repeat
-                              : Icons.receipt_long,
-                      color: e['kind'] == 'invoice'
-                          ? Colors.deepPurple
-                          : e['kind'] == 'recurring'
-                              ? Colors.orange.shade700
-                              : Colors.red.shade600,
-                    ),
-                    title: Text('${e['label']}'),
-                    subtitle: e['paid'] == true ? const Text('Paga') : null,
-                    trailing: Text(
-                      'R\$ ${fmtMoney((e['amount'] as double))}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final monthNames = [
@@ -294,7 +149,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${monthNames[focusedDay.month]} ${focusedDay.year}'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.chevron_left),
+              onPressed: () => _changeMonth(-1),
+            ),
+            Text('${monthNames[focusedDay.month]} ${focusedDay.year}'),
+            IconButton(
+              icon: const Icon(Icons.chevron_right),
+              onPressed: () => _changeMonth(1),
+            ),
+          ],
+        ),
         centerTitle: true,
         actions: [
           IconButton(icon: const Icon(Icons.logout), onPressed: () async {
@@ -306,11 +174,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'home_fab',
-        onPressed: _openAdd,
-        child: const Icon(Icons.add),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
@@ -324,8 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     constraints: const BoxConstraints(maxWidth: 900),
                     child: Column(
                       children: [
-                        _buildCalendar(),
-                        const SizedBox(height: 16),
                         _buildSummaryCards(),
                         const SizedBox(height: 16),
                         _buildAccountsCard(),
@@ -337,110 +198,64 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-    );
-  }
-
-  Widget _buildCalendar() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: TableCalendar<dynamic>(
-          firstDay: DateTime(2020),
-          lastDay: DateTime(2035),
-          focusedDay: focusedDay,
-          selectedDayPredicate: (d) => isSameDay(d, selectedDay),
-          locale: 'pt_BR',
-          startingDayOfWeek: StartingDayOfWeek.monday,
-          calendarFormat: CalendarFormat.month,
-          availableCalendarFormats: const {CalendarFormat.month: 'Mês'},
-          headerStyle: const HeaderStyle(formatButtonVisible: false),
-          eventLoader: _eventsFor,
-          onDaySelected: (sel, foc) {
-            setState(() {
-              selectedDay = sel;
-              focusedDay = foc;
-            });
-            _showDayDetails(sel);
-          },
-          onPageChanged: (foc) {
-            if (foc.year == focusedDay.year && foc.month == focusedDay.month) {
-              return;
-            }
-            setState(() {
-              focusedDay = foc;
-              loading = true;
-            });
-            _loadData();
-          },
-          calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, day, events) {
-              if (events.isEmpty) return null;
-              final kinds = events.map((e) => (e as Map)['kind']).toSet();
-              final colors = <Color>[
-                if (kinds.contains('invoice')) Colors.deepPurple,
-                if (kinds.contains('expense'))
-                  Theme.of(context).colorScheme.error,
-                if (kinds.contains('recurring')) Colors.orange.shade700,
-              ];
-              return Positioned(
-                bottom: 1,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (var i = 0; i < colors.length; i++)
-                      Padding(
-                        padding: EdgeInsets.only(left: i == 0 ? 0 : 2),
-                        child: Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: colors[i],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'home_fab',
+        onPressed: _openAdd,
+        child: const Icon(Icons.add),
       ),
     );
   }
 
   Widget _buildSummaryCards() {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _summaryCard(
-            'Saldo total',
-            totalBalance,
-            scheme.primaryContainer,
-            scheme.onPrimaryContainer,
-            Icons.account_balance_wallet,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _summaryCard(
+                'Saldo em contas',
+                totalBalance,
+                scheme.primaryContainer,
+                scheme.onPrimaryContainer,
+                Icons.account_balance,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _summaryCard(
+                'Carteira',
+                walletBalance,
+                scheme.tertiaryContainer,
+                scheme.onTertiaryContainer,
+                Icons.wallet,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _summaryCard(
-            'Despesas pagas',
-            monthlyExpensePaid,
-            scheme.errorContainer,
-            scheme.onErrorContainer,
-            Icons.payments,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _summaryCard(
-            'Cartão no mês',
-            cardUsedMonth,
-            const Color(0xFFD1C4E9),
-            const Color(0xFF311B92),
-            Icons.credit_card,
-          ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _summaryCard(
+                'Despesas pagas',
+                monthlyExpensePaid,
+                scheme.errorContainer,
+                scheme.onErrorContainer,
+                Icons.payments,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _summaryCard(
+                'Cartão no mês',
+                cardUsedMonth,
+                const Color(0xFFD1C4E9),
+                const Color(0xFF311B92),
+                Icons.credit_card,
+              ),
+            ),
+          ],
         ),
       ],
     );

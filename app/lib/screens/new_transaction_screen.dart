@@ -455,14 +455,18 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                         if (picked != null) {
                           setState(() {
                             date = picked;
-                            // Data futura => ainda a pagar; hoje/passado => pago.
-                            final today = DateTime.now();
-                            final todayOnly = DateTime(
-                              today.year, today.month, today.day,
-                            );
-                            isPaid = !DateTime(
-                              picked.year, picked.month, picked.day,
-                            ).isAfter(todayOnly);
+                            // Na criacao: data futura => a pagar; hoje/passado
+                            // => pago. Na edicao preserva o status atual —
+                            // marcar/desmarcar pago e feito na tela de Orcamento.
+                            if (!isEditing) {
+                              final today = DateTime.now();
+                              final todayOnly = DateTime(
+                                today.year, today.month, today.day,
+                              );
+                              isPaid = !DateTime(
+                                picked.year, picked.month, picked.day,
+                              ).isAfter(todayOnly);
+                            }
                           });
                         }
                       },
@@ -574,16 +578,6 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                         ),
                       ],
                     ],
-                    if (type != 'transfer' && !payWithCard && !isRecurring)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Pago'),
-                        subtitle: isPaid
-                            ? null
-                            : const Text('Fica pendente até você confirmar'),
-                        value: isPaid,
-                        onChanged: (v) => setState(() => isPaid = v),
-                      ),
                     if (type != 'transfer' && !isEditing && selectedCardId == null)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,

@@ -114,8 +114,24 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     return Colors.green.shade700;
   }
 
+  // Fatura alvo do pagamento: a mais antiga ainda nao quitada, pela
+  // data de vencimento — e a que o usuario espera pagar (vence antes),
+  // nao necessariamente a que esta em composicao neste mes.
+  dynamic get _invoiceToPay {
+    final unpaid = invoices
+        .where(
+          (i) =>
+              i['status'] != 'paid' &&
+              ((i['remaining'] as num?)?.toDouble() ?? 0) > 0.01 &&
+              i['due_date'] != null,
+        )
+        .toList()
+      ..sort((a, b) => '${a['due_date']}'.compareTo('${b['due_date']}'));
+    return unpaid.isEmpty ? null : unpaid.first;
+  }
+
   Future<void> _payInvoice() async {
-    final inv = currentInvoice;
+    final inv = _invoiceToPay;
     if (inv == null || inv['id'] == null) return;
     final accountsRes = await ApiService.get('/accounts');
     final accounts = ApiService.decode(accountsRes) as List? ?? [];
@@ -130,6 +146,14 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Mostra qual fatura sera quitada: referencia + vencimento.
+              Text(
+                'Fatura de '
+                '${_monthLabel(inv['reference_month']?.toString())}'
+                ' — vence ${fmtDate(inv['due_date'])}',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
               Text(
                 'Total restante: ${_money(inv['remaining'])}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
@@ -452,13 +476,17 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Text('Nenhuma compra nesta fatura.'),
               ),
-            if (remaining > 0.01) ...[
+            if (_invoiceToPay != null) ...[
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.payment),
-                  label: Text('Pagar fatura (${_money(remaining)})'),
+                  label: Text(
+                    'Pagar fatura de '
+                    '${fmtDate(_invoiceToPay['due_date'])} '
+                    '(${_money(_invoiceToPay['remaining'])})',
+                  ),
                   onPressed: _payInvoice,
                 ),
               ),

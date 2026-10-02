@@ -1,11 +1,41 @@
 import 'package:flutter/material.dart';
 import '../utils/icon_map.dart';
 import 'package:intl/intl.dart';
+import '../models/account.dart';
 import '../models/budget.dart';
 import '../models/category.dart';
+import '../models/transaction.dart';
 import '../services/api_service.dart';
 import '../utils/money_parser.dart';
 import '../utils/formatters.dart';
+
+// Item da linha do tempo do saldo: um lancamento (pago ou previsto)
+// ou o restante de uma fatura ainda nao paga.
+class _FlowItem {
+  _FlowItem({
+    required this.date,
+    required this.label,
+    required this.effect,
+    required this.pending,
+    this.subtitle,
+  });
+  final DateTime date;
+  final String label;
+  final double effect;
+  final bool pending;
+  final String? subtitle;
+}
+
+// Grupo de previsoes sob uma categoria-pai: orcamentos feitos em
+// subcategorias entram no somatorio da categoria.
+class _BudgetGroup {
+  _BudgetGroup(this.categoryId, this.items);
+  final int categoryId;
+  final List<Budget> items;
+
+  double get amount => items.fold(0.0, (s, b) => s + b.amount);
+  double get spent => items.fold(0.0, (s, b) => s + b.spent);
+}
 
 class BudgetsScreen extends StatefulWidget {
   const BudgetsScreen({super.key});
@@ -17,6 +47,8 @@ class BudgetsScreen extends StatefulWidget {
 class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Budget> budgets = [];
   List<dynamic> cardInvoices = [];
+  List<Transaction> monthTransactions = [];
+  List<Account> accounts = [];
   List<Category> expenseCategories = [];
   bool loading = true;
   String month = DateTime.now().toIso8601String().substring(0, 7);
@@ -35,9 +67,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   Future<void> _load() async {
-    final [bRes, cRes] = await Future.wait([
+    final [bRes, cRes, tRes, aRes] = await Future.wait([
       ApiService.get('/budgets?month=$month'),
       ApiService.get('/categories?type=expense&flat=true'),
+      ApiService.get('/transactions?month=$month&limit=1000&order=date_asc'),
+      ApiService.get('/accounts'),
     ]);
     setState(() {
       final bData = ApiService.decode(bRes) as Map<String, dynamic>;
@@ -45,6 +79,15 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           .map((e) => Budget.fromJson(e))
           .toList();
       cardInvoices = bData['card_invoices'] as List? ?? [];
+      final tData = ApiService.decode(tRes) as Map<String, dynamic>;
+      monthTransactions = (tData['transactions'] as List? ?? [])
+          .map((e) => Transaction.fromJson(e))
+          .toList();
+      accounts = ApiService.decode(aRes) is List
+          ? (ApiService.decode(aRes) as List)
+              .map((e) => Account.fromJson(e))
+              .toList()
+          : [];
       totals = bData['totals'] as Map<String, dynamic>? ?? {};
       expenseCategories = (ApiService.decode(cRes) as List)
           .map((e) => Category.fromJson(e))
@@ -70,10 +113,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     final controller = TextEditingController(
       text: fmtMoney(b.amount),
     );
+    final cat = _catById[b.categoryId];
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Previsão: ${b.categoryName}'),
+        title: Text('Previsão: ${cat != null ? _catLabel(cat) : b.categoryName}'),
         content: TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -236,6 +280,453 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     _load();
   }
 
+  // Lancamentos do mes que podem ser confirmados aqui: despesas/receitas
+  // e transferencias em conta. Compras no cartao nao entram — elas se
+  // pagam como fatura; o lancamento interno de pagamento tambem fica fora.
+  List<Transaction> get _entries => monthTransactions
+      .where((t) => t.cardId == null && t.source != 'invoice_payment')
+      .toList();
+
+  // Pendentes primeiro (mais proximas de vencer no topo), depois os
+  // confirmados (mais recentes primeiro).
+  List<Transaction> get _pending {
+    final list = _entries.where((t) => !t.isPaid).toList();
+    list.sort((a, b) => a.date.compareTo(b.date));
+    return list;
+  }
+
+  List<Transaction> get _confirmed {
+    final list = _entries.where((t) => t.isPaid).toList();
+    list.sort((a, b) => b.date.compareTo(a.date));
+    return list;
+  }
+
+  // Marca/desmarca pago — e aqui que a baixa de um lancamento acontece.
+  Future<void> _togglePaid(Transaction t) async {
+    await ApiService.put('/transactions/${t.id}', {'is_paid': !t.isPaid});
+    _load();
+  }
+
+  Widget _payTile(Transaction t, bool paid) {
+    final color = t.isIncome
+        ? Colors.green.shade700
+        : t.isTransfer
+            ? Colors.orange.shade700
+            : Colors.red.shade600;
+    final sign = t.isIncome ? '+' : t.isExpense ? '-' : '';
+    // Pendente com data passada => atrasada.
+    final now = DateTime.now();
+    final overdue = !paid &&
+        DateTime(t.date.year, t.date.month, t.date.day)
+            .isBefore(DateTime(now.year, now.month, now.day));
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      onTap: () => _togglePaid(t),
+      leading: IconButton(
+        tooltip: paid ? 'Desmarcar pago' : 'Marcar como pago',
+        icon: Icon(
+          paid ? Icons.check_circle : Icons.radio_button_unchecked,
+          color: paid ? Colors.green : Theme.of(context).colorScheme.outline,
+        ),
+        onPressed: () => _togglePaid(t),
+      ),
+      title: Text(
+        t.description ?? t.categoryLabel ?? 'Transação',
+        style: paid
+            ? const TextStyle(decoration: TextDecoration.lineThrough)
+            : null,
+      ),
+      subtitle: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: [
+                fmtDate(t.date),
+                if (t.isTransfer)
+                  '${t.accountName ?? ''} → ${t.transferAccountName ?? ''}'
+                else if (t.categoryLabel != null)
+                  t.categoryLabel!,
+                if (t.accountName != null && !t.isTransfer) t.accountName,
+              ].join(' • '),
+            ),
+            if (overdue)
+              TextSpan(
+                text: ' • Atrasada',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+          ],
+        ),
+      ),
+      trailing: Text(
+        '$sign R\$ ${fmtMoney(t.amount)}',
+        style: TextStyle(color: color, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  // Previsoes agrupadas pela categoria-pai, em ordem alfabetica.
+  List<_BudgetGroup> get _budgetGroups {
+    final groups = <int, _BudgetGroup>{};
+    for (final b in budgets) {
+      final cat = _catById[b.categoryId];
+      final parentId = cat?.parentId ?? b.categoryId;
+      groups.putIfAbsent(parentId, () => _BudgetGroup(parentId, []))
+          .items
+          .add(b);
+    }
+    final list = groups.values.toList();
+    list.sort(
+      (a, b) => _groupLabel(a).toLowerCase().compareTo(
+            _groupLabel(b).toLowerCase(),
+          ),
+    );
+    return list;
+  }
+
+  String _groupLabel(_BudgetGroup g) =>
+      _catById[g.categoryId]?.name ?? g.items.first.categoryName;
+
+  Category? _groupCategory(_BudgetGroup g) => _catById[g.categoryId];
+
+  // Tile de uma previsao: usado sozinho (sem subcategorias) ou como
+  // filho dentro de um grupo expandido.
+  Widget _budgetTile(Budget b, {bool child = false, String? label}) {
+    final cat = _catById[b.categoryId];
+    final color = cat?.getColor() ?? b.getColor();
+    return ListTile(
+      onTap: () => _editBudget(b),
+      contentPadding: child ? const EdgeInsets.only(left: 56) : null,
+      dense: child,
+      leading: child
+          ? null
+          : CircleAvatar(
+              backgroundColor: color,
+              child: Icon(
+                iconFromName(cat?.icon ?? b.categoryIcon),
+                color: Colors.white,
+              ),
+            ),
+      title: Text(label ?? b.categoryName),
+      subtitle: Text('Pago: R\$ ${fmtMoney(b.spent)}'),
+      trailing: Text(
+        'R\$ ${fmtMoney(b.amount)}',
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _budgetGroupTile(_BudgetGroup g) {
+    if (g.items.length == 1) return _budgetTile(g.items.first);
+    final cat = _groupCategory(g);
+    return ExpansionTile(
+      leading: CircleAvatar(
+        backgroundColor: cat?.getColor() ?? g.items.first.getColor(),
+        child: Icon(
+          iconFromName(cat?.icon ?? g.items.first.categoryIcon),
+          color: Colors.white,
+        ),
+      ),
+      title: Text(_groupLabel(g)),
+      subtitle: Text(
+        'Pago: R\$ ${fmtMoney(g.spent)} • Previsto: R\$ ${fmtMoney(g.amount)}',
+      ),
+      children: [
+        for (final b in g.items)
+          _budgetTile(
+            b,
+            child: true,
+            label: _catById[b.categoryId]?.name ?? b.categoryName,
+          ),
+      ],
+    );
+  }
+
+  // Contas que compoem o "saldo em contas" (mesma regra da home):
+  // poupanca, investimento e carteira ficam de fora.
+  Set<int> get _balanceAccountIds => {
+        for (final a in accounts)
+          if (a.type != 'savings' &&
+              a.type != 'investment' &&
+              a.type != 'cash')
+            a.id,
+      };
+
+  // Efeito liquido do lancamento no saldo em contas: despesa sai,
+  // receita entra; transferencia so conta quando cruza a fronteira
+  // (ex.: corrente -> poupanca reduz o saldo em contas).
+  double _effectOnBalance(Transaction t) {
+    final ids = _balanceAccountIds;
+    if (t.isTransfer) {
+      final out = ids.contains(t.accountId) ? t.amount : 0.0;
+      final inn = ids.contains(t.transferAccountId) ? t.amount : 0.0;
+      return inn - out;
+    }
+    if (!ids.contains(t.accountId)) return 0;
+    return t.isIncome ? t.amount : -t.amount;
+  }
+
+  // Linha do tempo do mes em ordem cronologica: lancamentos que mexem
+  // no saldo + restante de faturas ainda nao quitadas no vencimento.
+  List<_FlowItem> get _flowItems {
+    double invoiceRemaining(dynamic inv) =>
+        (inv['remaining'] as num?)?.toDouble() ??
+        ((inv['total_amount'] as num?)?.toDouble() ?? 0) -
+            ((inv['paid_amount'] as num?)?.toDouble() ?? 0);
+    final items = <_FlowItem>[
+      for (final t in monthTransactions)
+        if (_effectOnBalance(t) != 0)
+          _FlowItem(
+            date: t.date,
+            label: t.description ?? t.categoryLabel ?? 'Transação',
+            effect: _effectOnBalance(t),
+            pending: !t.isPaid,
+            subtitle: t.isTransfer
+                ? '${t.accountName ?? ''} → ${t.transferAccountName ?? ''}'
+                : t.categoryLabel ?? t.accountName,
+          ),
+      for (final inv in cardInvoices)
+        if (inv['due_date'] != null && invoiceRemaining(inv) > 0)
+          _FlowItem(
+            date: DateTime.parse('${inv['due_date']}'.substring(0, 10)),
+            label: 'Fatura ${inv['card_name'] ?? ''}',
+            effect: -invoiceRemaining(inv),
+            pending: true,
+            subtitle: 'Vencimento da fatura',
+          ),
+    ];
+    items.sort((a, b) => a.date.compareTo(b.date));
+    return items;
+  }
+
+  // Saldo atual das contas (mesmo conjunto do card da home).
+  double get _currentBalance => accounts
+      .where((a) => _balanceAccountIds.contains(a.id))
+      .fold(0.0, (s, a) => s + a.currentBalance);
+
+  // Saldo no inicio do mes = saldo de hoje menos o que ja foi baixado
+  // dentro do mes selecionado.
+  double get _openingBalance {
+    final paidEffect = monthTransactions
+        .where((t) => t.isPaid)
+        .fold(0.0, (s, t) => s + _effectOnBalance(t));
+    return _currentBalance - paidEffect;
+  }
+
+  Widget _flowRow(_FlowItem item, double running) {
+    final scheme = Theme.of(context).colorScheme;
+    final labelStyle = item.pending
+        ? TextStyle(fontStyle: FontStyle.italic, color: scheme.outline)
+        : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 44,
+            child: Text(
+              DateFormat('dd/MM').format(item.date),
+              style: labelStyle ??
+                  TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.label,
+                  style: labelStyle,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (item.subtitle != null)
+                  Text(
+                    item.subtitle!,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: scheme.outline),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${item.effect >= 0 ? '+' : '−'} R\$ ${fmtMoney(item.effect.abs())}',
+                style: TextStyle(
+                  color: item.effect >= 0
+                      ? Colors.green.shade700
+                      : scheme.error,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+              Text(
+                'saldo R\$ ${fmtMoney(running)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: running < 0 ? scheme.error : scheme.outline,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Evolucao do saldo ao longo do mes: cada lancamento mostra quanto
+  // fica o saldo depois dele; pendentes aparecem em italico.
+  Widget _buildFlowCard() {
+    final items = _flowItems;
+    if (items.isEmpty) return const SizedBox.shrink();
+    var running = _openingBalance;
+    final rows = <Widget>[];
+    for (final item in items) {
+      running += item.effect;
+      rows.add(_flowRow(item, running));
+    }
+    final projected = running;
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Evolução do saldo',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Saldo após cada lançamento do mês',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.outline),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Saldo no início do mês'),
+                Text(
+                  'R\$ ${fmtMoney(_openingBalance)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const Divider(height: 16),
+            ...rows,
+            const Divider(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Saldo projetado no fim do mês',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  'R\$ ${fmtMoney(projected)}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color:
+                        projected < 0 ? scheme.error : Colors.green.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Paga (total ou parcial) a fatura — mesmo endpoint usado no
+  // detalhe do cartao; baixa na conta escolhida e atualiza tudo.
+  Future<void> _payInvoice(dynamic inv) async {
+    final remaining = (inv['remaining'] as num?)?.toDouble() ?? 0;
+    if (remaining <= 0 || accounts.isEmpty) return;
+    int? accountId;
+    final amountCtrl =
+        TextEditingController(text: fmtMoney(remaining));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Pagar fatura'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Fatura ${inv['card_name'] ?? ''} '
+                '(${inv['reference_month'] ?? ''})'
+                ' — vence ${fmtDate(inv['due_date'])}',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amountCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [MoneyInputFormatter()],
+                decoration: const InputDecoration(
+                  labelText: 'Valor do pagamento',
+                  prefixText: 'R\$ ',
+                  helperText: 'Deixe o total para quitar a fatura',
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: accountId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Conta para débito',
+                ),
+                items: [
+                  for (final a in accounts)
+                    DropdownMenuItem(value: a.id, child: Text(a.name)),
+                ],
+                onChanged: (v) => setDialog(() => accountId = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (accountId == null) return;
+                Navigator.pop(context, true);
+              },
+              child: const Text('Pagar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || accountId == null) return;
+    final amount = parseMoney(amountCtrl.text);
+    if (amount == null || amount <= 0) return;
+    await ApiService.post('/cards/invoices/${inv['id']}/pay', {
+      'account_id': accountId,
+      'amount': amount,
+    });
+    _load();
+  }
+
   // Faturas agrupadas por cartao.
   Map<String, List<dynamic>> get _invoicesByCard {
     final map = <String, List<dynamic>>{};
@@ -363,6 +854,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
+                      _buildFlowCard(),
+                      const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -389,26 +882,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                             'ou manualmente pelo botão acima.',
                           ),
                         ),
-                      ...budgets.map(
-                        (b) => ListTile(
-                          onTap: () => _editBudget(b),
-                          leading: CircleAvatar(
-                            backgroundColor: b.getColor(),
-                            child: Icon(
-                              iconFromName(b.categoryIcon),
-                              color: Colors.white,
-                            ),
-                          ),
-                          title: Text(b.categoryName),
-                          subtitle: Text(
-                            'Pago: R\$ ${fmtMoney(b.spent)}',
-                          ),
-                          trailing: Text(
-                            'R\$ ${fmtMoney(b.amount)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
+                      ..._budgetGroups.map(_budgetGroupTile),
                       if (_invoicesByCard.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Text(
@@ -423,6 +897,48 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                           (entry) => _buildCardSection(entry.key, entry.value),
                         ),
                       ],
+                      if (_entries.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Lançamentos do mês',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Toque para confirmar ou desfazer o pagamento.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 4),
+                        if (_pending.isNotEmpty) ...[
+                          Text(
+                            'Pendentes',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                  color:
+                                      Theme.of(context).colorScheme.primary,
+                                ),
+                          ),
+                          ..._pending.map((t) => _payTile(t, false)),
+                        ],
+                        if (_confirmed.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Confirmados',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                  color: Colors.green.shade700,
+                                ),
+                          ),
+                          ..._confirmed.map((t) => _payTile(t, true)),
+                        ],
+                      ],
                     ],
                   ),
                 ),
@@ -436,33 +952,30 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     );
   }
 
+  // Cartao expansivel: cabecalho mostra nome + total das faturas do
+  // mes; expandindo aparecem as faturas com as categorias das compras.
   Widget _buildCardSection(String cardName, List<dynamic> invoices) {
     final cardTotal = invoices.fold<double>(
       0,
       (s, i) => s + ((i['total_amount'] as num?)?.toDouble() ?? 0),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      leading: const CircleAvatar(
+        backgroundColor: Colors.deepPurple,
+        child: Icon(Icons.credit_card, color: Colors.white),
+      ),
+      title: Text(
+        cardName,
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      subtitle: Text(
+        '${invoices.length} fatura${invoices.length == 1 ? '' : 's'} • '
+        'R\$ ${fmtMoney(cardTotal)}',
+      ),
+      childrenPadding: const EdgeInsets.only(left: 8),
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 2),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                cardName,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              Text(
-                'R\$ ${fmtMoney(cardTotal)}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-        ...invoices.map((inv) => _buildInvoiceBlock(inv)),
+        for (final inv in invoices) _buildInvoiceBlock(inv),
       ],
     );
   }
@@ -503,7 +1016,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         dueLabel = ' • vence ${DateFormat('dd/MM').format(d)}';
       } catch (_) {}
     }
+    final remaining = total - paid;
     return ListTile(
+      onTap:
+          isPaid ? null : () => _payInvoice(inv),
       leading: CircleAvatar(
         backgroundColor: isPaid ? Colors.green : Colors.deepPurple,
         child: Icon(
@@ -511,15 +1027,26 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           color: Colors.white,
         ),
       ),
-      title: Text('Fatura'),
+      title: const Text('Fatura'),
       subtitle: Text(
         isPaid
             ? 'Paga$dueLabel'
             : 'Pago: R\$ ${fmtMoney(paid)}$dueLabel',
       ),
-      trailing: Text(
-        'R\$ ${fmtMoney(total)}',
-        style: const TextStyle(fontWeight: FontWeight.bold),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'R\$ ${fmtMoney(total)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          if (remaining > 0.01)
+            IconButton(
+              tooltip: 'Pagar fatura',
+              icon: const Icon(Icons.payments_outlined, size: 20),
+              onPressed: () => _payInvoice(inv),
+            ),
+        ],
       ),
     );
   }
