@@ -18,12 +18,16 @@ class _FlowItem {
     required this.effect,
     required this.pending,
     this.subtitle,
+    this.time,
+    this.isIncome = false,
   });
   final DateTime date;
   final String label;
   final double effect;
   final bool pending;
   final String? subtitle;
+  final String? time;
+  final bool isIncome;
 }
 
 // Grupo de previsoes sob uma categoria-pai: orcamentos feitos em
@@ -487,6 +491,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             subtitle: t.isTransfer
                 ? '${t.accountName ?? ''} → ${t.transferAccountName ?? ''}'
                 : t.categoryLabel ?? t.accountName,
+            time: t.time,
+            isIncome: t.isIncome,
           ),
       for (final inv in cardInvoices)
         if (inv['due_date'] != null && invoiceRemaining(inv) > 0)
@@ -498,7 +504,14 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             subtitle: 'Vencimento da fatura',
           ),
     ];
-    items.sort((a, b) => a.date.compareTo(b.date));
+    // Cronologico, com receitas sempre antes das demais no mesmo dia;
+    // depois ordena pelo horario (fatura sem horario vai por ultimo).
+    items.sort((a, b) {
+      final d = a.date.compareTo(b.date);
+      if (d != 0) return d;
+      if (a.isIncome != b.isIncome) return a.isIncome ? -1 : 1;
+      return (a.time ?? '23:59').compareTo(b.time ?? '23:59');
+    });
     return items;
   }
 
@@ -516,6 +529,16 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     return _currentBalance - paidEffect;
   }
 
+  // Saldo no fim do mes = abertura + todos os lancamentos (pagos e
+  // previstos) + faturas ainda nao quitadas.
+  double get _projectedEndBalance {
+    var value = _openingBalance;
+    for (final item in _flowItems) {
+      value += item.effect;
+    }
+    return value;
+  }
+
   Widget _flowRow(_FlowItem item, double running) {
     final scheme = Theme.of(context).colorScheme;
     final labelStyle = item.pending
@@ -526,11 +549,22 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       child: Row(
         children: [
           SizedBox(
-            width: 44,
-            child: Text(
-              DateFormat('dd/MM').format(item.date),
-              style: labelStyle ??
-                  TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+            width: 52,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  DateFormat('dd/MM').format(item.date),
+                  style: labelStyle ??
+                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                ),
+                if (item.time != null)
+                  Text(
+                    item.time!,
+                    style: labelStyle ??
+                        TextStyle(color: scheme.outline, fontSize: 10),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -798,6 +832,16 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                               ),
                               const SizedBox(height: 8),
                               _totalLine(
+                                'Saldo no início do mês',
+                                _openingBalance,
+                                _openingBalance < 0
+                                    ? Theme.of(context).colorScheme.error
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                              ),
+                              const Divider(),
+                              _totalLine(
                                 'Previsto em débito (contas e recorrentes)',
                                 debito,
                                 Theme.of(context).colorScheme.primary,
@@ -830,9 +874,17 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                                 Theme.of(context).colorScheme.tertiary,
                               ),
                               _totalLine(
-                                'Previsão de sobra (receita − previsto)',
+                                'Sobra do mês (receita − previsto)',
                                 sobraPrevista,
                                 sobraPrevista >= 0
+                                    ? Colors.green.shade700
+                                    : Theme.of(context).colorScheme.error,
+                              ),
+                              const Divider(),
+                              _totalLine(
+                                'Saldo projetado no fim do mês',
+                                _projectedEndBalance,
+                                _projectedEndBalance >= 0
                                     ? Colors.green.shade700
                                     : Theme.of(context).colorScheme.error,
                                 bold: true,

@@ -17,6 +17,8 @@ async function generateUpTo(conn, userId, recurring, upTo) {
       type: recurring.type,
       amount: recurring.amount,
       date: next,
+      // Recorrencia nao tem horario real — sempre 00:00.
+      time: '00:00:00',
       accrual_date: next,
       payment_date: next,
       is_paid: next <= today,

@@ -165,8 +165,8 @@ async function buildFilters(req) {
 }
 
 const ORDERS = {
-  date_desc: 't.date DESC, t.id DESC',
-  date_asc: 't.date ASC, t.id ASC',
+  date_desc: 't.date DESC, t.time DESC, t.id DESC',
+  date_asc: 't.date ASC, t.time ASC, t.id ASC',
   amount_desc: 't.amount DESC, t.id DESC',
   amount_asc: 't.amount ASC, t.id ASC',
 };
@@ -633,7 +633,9 @@ function buildPayload(body = {}, req) {
     type,
     amount,
     date: String(body.date).slice(0, 10),
-    time: body.time || null,
+    // Manual: app envia o horario do toque em Salvar; fallback = agora (server).
+    // Recorrente: sempre 00:00.
+    time: body.time || (body.recurring_id ? '00:00:00' : new Date().toTimeString().slice(0, 8)),
     description: body.description || null,
     notes: body.notes || null,
     family_id: body.family_id || null,

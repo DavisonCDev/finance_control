@@ -55,6 +55,11 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
   final descriptionController = TextEditingController();
   final installmentsController = TextEditingController(text: '1');
   DateTime date = DateTime.now();
+  TimeOfDay time = TimeOfDay.now();
+  // Sem marcacao: captura data/hora do momento do salvamento.
+  bool manualDateTime = false;
+  // Recorrencia exige data escolhida manualmente.
+  bool datePicked = false;
   bool isRecurring = false;
   String frequency = 'monthly';
   DateTime? endDate;
@@ -81,6 +86,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
       amountController.text = fmtMoney(t.amount);
       descriptionController.text = t.description ?? '';
       date = t.date;
+      if (t.timeOfDay != null) time = t.timeOfDay!;
       isPaid = t.isPaid;
     }
     _load();
@@ -159,8 +165,26 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
       return;
     }
 
+    if (!isEditing && isRecurring && !datePicked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Escolha a data de início da recorrência.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => saving = true);
+    final now = DateTime.now();
+    if (!isEditing && !isRecurring && !manualDateTime) {
+      // Captura automatica: data/hora do momento em que tocou em Salvar.
+      date = now;
+      time = TimeOfDay.fromDateTime(now);
+      isPaid = true;
+    }
     final dateStr = date.toIso8601String().split('T').first;
+    final timeStr =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
 
     http.Response res;
     if (isEditing) {
@@ -168,6 +192,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
         'type': type,
         'amount': amount,
         'date': dateStr,
+        'time': timeStr,
         'description': descriptionController.text,
         'category_id': selectedCategoryId,
         'is_paid': isPaid,
@@ -233,6 +258,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
       res = await ApiService.post('/cards/$selectedCardId/purchases', {
         'amount': amount,
         'date': dateStr,
+        'time': timeStr,
         'category_id': selectedCategoryId,
         'description': descriptionController.text,
         'installments':
@@ -247,6 +273,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
         'category_id': selectedCategoryId,
         'amount': amount,
         'date': dateStr,
+        'time': timeStr,
         'description': descriptionController.text,
         'is_paid': isPaid,
       });
@@ -324,6 +351,55 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
           .showSnackBar(SnackBar(content: Text('$msg')));
     }
   }
+
+  Widget _dateTile() => ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(isRecurring && !isEditing ? 'Data de início' : 'Data'),
+        subtitle: Text(fmtDate(date)),
+        trailing: const Icon(Icons.calendar_today),
+        onTap: () async {
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: date,
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2035),
+          );
+          if (picked != null) {
+            setState(() {
+              date = picked;
+              datePicked = true;
+              // Na criacao: data futura => a pagar; hoje/passado
+              // => pago. Na edicao preserva o status atual —
+              // marcar/desmarcar pago e feito na tela de Orcamento.
+              if (!isEditing) {
+                final today = DateTime.now();
+                final todayOnly = DateTime(
+                  today.year, today.month, today.day,
+                );
+                isPaid = !DateTime(
+                  picked.year, picked.month, picked.day,
+                ).isAfter(todayOnly);
+              }
+            });
+          }
+        },
+      );
+
+  Widget _timeTile() => ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Horário'),
+        subtitle: Text(
+          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+        ),
+        trailing: const Icon(Icons.access_time),
+        onTap: () async {
+          final picked = await showTimePicker(
+            context: context,
+            initialTime: time,
+          );
+          if (picked != null) setState(() => time = picked);
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -440,37 +516,30 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                       ],
                     ],
                     if (type != 'transfer') const SizedBox(height: 8),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Data'),
-                      subtitle: Text(fmtDate(date)),
-                      trailing: const Icon(Icons.calendar_today),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: date,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            date = picked;
-                            // Na criacao: data futura => a pagar; hoje/passado
-                            // => pago. Na edicao preserva o status atual —
-                            // marcar/desmarcar pago e feito na tela de Orcamento.
-                            if (!isEditing) {
-                              final today = DateTime.now();
-                              final todayOnly = DateTime(
-                                today.year, today.month, today.day,
-                              );
-                              isPaid = !DateTime(
-                                picked.year, picked.month, picked.day,
-                              ).isAfter(todayOnly);
-                            }
-                          });
-                        }
-                      },
-                    ),
+                    // Recorrencia (criacao): data manual obrigatoria, sem
+                    // horario (00:00). Edicao: data e horario sempre editaveis.
+                    // Criacao comum: captura automatica, ou manual via caixa.
+                    if (isEditing || isRecurring) ...[
+                      _dateTile(),
+                      if (isEditing) _timeTile(),
+                    ] else ...[
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text('Definir data e horário manualmente'),
+                        subtitle: manualDateTime
+                            ? null
+                            : const Text(
+                                'Serão usadas a data e a hora atuais.'),
+                        value: manualDateTime,
+                        onChanged: (v) =>
+                            setState(() => manualDateTime = v ?? false),
+                      ),
+                      if (manualDateTime) ...[
+                        _dateTile(),
+                        _timeTile(),
+                      ],
+                    ],
                     const SizedBox(height: 8),
                     if (selectedCardId == null)
                       DropdownButtonFormField<int>(

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 class Transaction {
   final int id;
   final int? accountId;
@@ -11,6 +13,7 @@ class Transaction {
   final String type;
   final double amount;
   final DateTime date;
+  final String? time;
   final DateTime? accrualDate;
   final DateTime? paymentDate;
   final bool isPaid;
@@ -43,6 +46,7 @@ class Transaction {
     required this.type,
     required this.amount,
     required this.date,
+    this.time,
     this.accrualDate,
     this.paymentDate,
     this.isPaid = true,
@@ -77,6 +81,7 @@ class Transaction {
       type: json['type'],
       amount: double.tryParse(json['amount'].toString()) ?? 0.0,
       date: DateTime.parse(json['date']),
+      time: json['time'] != null ? '${json['time']}'.substring(0, 5) : null,
       accrualDate: json['accrual_date'] != null
           ? DateTime.parse(json['accrual_date'])
           : null,
@@ -124,6 +129,15 @@ class Transaction {
       'pc_reference': pcReference,
       'item': item,
     };
+  }
+
+  TimeOfDay? get timeOfDay {
+    if (time == null) return null;
+    final parts = time!.split(':');
+    return TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 0,
+      minute: int.tryParse(parts[1]) ?? 0,
+    );
   }
 
   bool get isIncome => type == 'income';

@@ -486,7 +486,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 router.post('/:id/purchases', asyncHandler(async (req, res) => {
   const card = await findCard(req.userId, req.params.id);
   const {
-    amount, date, category_id = null, description = null, notes = null, family_id = null,
+    amount, date, time = null, category_id = null, description = null, notes = null, family_id = null,
     accrual_date = null, payment_date = null, is_paid = false,
     payment_method = 'CREDIT_CARD', cost_center_id = null, contact_id = null,
     classification = null, pc_reference = null, item = null,
@@ -511,6 +511,7 @@ router.post('/:id/purchases', asyncHandler(async (req, res) => {
         type: 'expense',
         amount: round2(amount),
         date,
+        time,
         description,
         notes,
         family_id,
@@ -543,6 +544,7 @@ router.post('/:id/purchases', asyncHandler(async (req, res) => {
         type: 'expense',
         amount: parts[index],
         date: dueDate,
+        time,
         description: `${description || 'Compra no cartão'} (${number}/${count})`,
         notes,
         family_id,
