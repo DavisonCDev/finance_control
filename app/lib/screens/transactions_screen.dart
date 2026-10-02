@@ -18,6 +18,9 @@ class _Entry {
   final Transaction? tx;
   final dynamic invoice;
 
+  // Horario do lancamento; fatura nao tem (vai como fim do dia).
+  String? get time => tx?.time;
+
   // Fatura conta como "paga" quando esta quitada.
   bool get paid => tx?.isPaid ?? invoice['status'] == 'paid';
 }
@@ -183,7 +186,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       for (final i in invoices)
         if (((i['total_amount'] as num?)?.toDouble() ?? 0) > 0) _Entry.inv(i),
     ];
-    list.sort((a, b) => b.date.compareTo(a.date));
+    // Mais recentes primeiro; dentro do dia ordena pelo horario.
+    list.sort((a, b) {
+      final d = b.date.compareTo(a.date);
+      if (d != 0) return d;
+      return (b.time ?? '23:59').compareTo(a.time ?? '23:59');
+    });
     return list;
   }
 
@@ -251,7 +259,11 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   // aparecem primeiro (data mais antiga no topo).
   List<_Entry> get _future {
     final list = _entries.where((e) => !e.paid).toList();
-    list.sort((a, b) => a.date.compareTo(b.date));
+    list.sort((a, b) {
+      final d = a.date.compareTo(b.date);
+      if (d != 0) return d;
+      return (a.time ?? '23:59').compareTo(b.time ?? '23:59');
+    });
     return list;
   }
 
@@ -629,12 +641,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 ),
               );
 
-    final subtitle = t.isTransfer
-        ? '${t.accountName ?? ''} → ${t.transferAccountName ?? ''}'
-        : [
-            if (t.categoryLabel != null) t.categoryLabel,
-            if (t.cardName != null) t.cardName else t.accountName,
-          ].whereType<String>().join(' • ');
+    final subtitle = [
+      if (t.time != null) t.time!,
+      if (t.isTransfer)
+        '${t.accountName ?? ''} → ${t.transferAccountName ?? ''}'
+      else ...[
+        if (t.categoryLabel != null) t.categoryLabel,
+        if (t.cardName != null) t.cardName else t.accountName,
+      ],
+    ].whereType<String>().where((s) => s.isNotEmpty).join(' • ');
 
     // Nao paga e vencida => "Atrasada" em vermelho; senao "A pagar".
     final status = t.isPaid

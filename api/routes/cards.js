@@ -187,7 +187,7 @@ async function ensurePaymentCategory(conn, userId, name = 'Cartão de crédito')
 }
 
 router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
-  const { account_id, amount, date, category_id } = req.body;
+  const { account_id, amount, date, time, category_id } = req.body;
   if (!account_id) throw fail('Informe a conta usada no pagamento.');
 
   const payload = await withTransaction(async conn => {
@@ -223,6 +223,7 @@ router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
       type: 'expense',
       amount: value,
       date: paidAt,
+      time: time || new Date().toTimeString().slice(0, 8),
       description: `Pagamento fatura ${invoice.card_name} ${invoice.reference_month}`,
       source: 'invoice_payment',
     });
