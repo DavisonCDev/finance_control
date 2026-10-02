@@ -190,7 +190,7 @@ class _CardsScreenState extends State<CardsScreen> {
               } else {
                 await ApiService.post('/cards', body);
               }
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
               _load();
             },
             child: const Text('Salvar'),

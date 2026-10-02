@@ -128,7 +128,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
               } else {
                 await ApiService.post('/accounts', body);
               }
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
               _load();
             },
             child: const Text('Salvar'),

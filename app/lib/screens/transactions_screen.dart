@@ -18,8 +18,12 @@ class _Entry {
   final Transaction? tx;
   final dynamic invoice;
 
-  // Horario do lancamento; fatura nao tem (vai como fim do dia).
-  String? get time => tx?.time;
+  // Horario do lancamento; fatura usa o horario do pagamento.
+  String? get time {
+    if (tx != null) return tx!.time;
+    final paidTime = invoice['paid_time'];
+    return paidTime != null ? '$paidTime'.substring(0, 5) : null;
+  }
 
   // Fatura conta como "paga" quando esta quitada.
   bool get paid => tx?.isPaid ?? invoice['status'] == 'paid';
@@ -690,6 +694,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   // Fatura de cartao exibida na data de vencimento; abre o detalhe do cartao.
   Widget _invoiceTile(dynamic inv) {
     final paid = inv['status'] == 'paid';
+    final paidTime = inv['paid_time'] != null
+        ? '${inv['paid_time']}'.substring(0, 5)
+        : null;
     final amount = (inv['total_amount'] as num?)?.toDouble() ?? 0;
     final remaining = (inv['remaining'] as num?)?.toDouble() ?? amount;
     final due = DateTime.parse('${inv['due_date']}'.substring(0, 10));
@@ -715,7 +722,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           children: [
             TextSpan(
               text: paid
-                  ? 'Paga'
+                  ? '${paidTime != null ? '$paidTime • ' : ''}Paga'
                   : remaining < amount
                       ? 'Parcial — restam R\$ ${fmtMoney(remaining)}'
                       : 'Vence $dueStr',

@@ -36,7 +36,6 @@ class _GoalsScreenState extends State<GoalsScreen> {
     final amountController = TextEditingController();
     final notesController = TextEditingController();
     List<Account> accounts = [];
-    List<dynamic> contributions = [];
     int? selectedAccountId;
 
     await showDialog(
@@ -119,13 +118,13 @@ class _GoalsScreenState extends State<GoalsScreen> {
                           body,
                         );
                         if (res.statusCode == 201) {
-                          if (mounted) Navigator.pop(context);
+                          if (context.mounted) Navigator.pop(context);
                           _load();
                           _showContributions(goal);
                         } else {
                           final msg =
                               ApiService.decode(res)['error'] ?? res.body;
-                          if (mounted) {
+                          if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Erro: $msg')),
                             );
@@ -326,7 +325,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
               } else {
                 await ApiService.post('/goals', body);
               }
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
               _load();
             },
             child: const Text('Salvar'),

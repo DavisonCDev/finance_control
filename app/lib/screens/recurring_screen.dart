@@ -294,10 +294,10 @@ class _RecurringScreenState extends State<RecurringScreen> {
                     res = await ApiService.post('/recurring', body);
                   }
                   if (res.statusCode == 200 || res.statusCode == 201) {
-                    if (mounted) Navigator.pop(context);
+                    if (context.mounted) Navigator.pop(context);
                     _load();
                   } else {
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('Erro ao salvar: ${res.statusCode}'),

@@ -53,6 +53,7 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
     final accounts = ApiService.decode(accountsRes) as List;
     int? selectedAccountId;
 
+    if (!mounted) return;
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -100,7 +101,7 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
                 );
                 if (res.statusCode == 200 || res.statusCode == 201) {
                   _load();
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Fatura paga.')),
                     );
@@ -110,7 +111,7 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
                   final msg = decoded is Map
                       ? (decoded['message'] ?? res.body)
                       : res.body;
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(
                       context,
                     ).showSnackBar(SnackBar(content: Text('Erro: $msg')));

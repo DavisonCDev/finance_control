@@ -53,11 +53,13 @@ class _GoalsMonthlyScreenState extends State<GoalsMonthlyScreen> {
         'months': months,
       });
       if (res.statusCode >= 400) throw Exception(ApiService.decode(res)['error'] ?? 'Erro');
+      if (!mounted) return;
       setState(() { data = ApiService.decode(res) as Map<String, dynamic>; });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Metas salvas com sucesso.')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao salvar: $e')),
       );
@@ -281,7 +283,7 @@ class _GoalsMonthlyScreenState extends State<GoalsMonthlyScreen> {
                         child: Text(
                           '${v.toStringAsFixed(1)}%',
                           style: TextStyle(
-                            color: (v as num) >= 0 ? Colors.green : Colors.red,
+                            color: v >= 0 ? Colors.green : Colors.red,
                             fontWeight: FontWeight.w600,
                           ),
                         ),

@@ -44,7 +44,7 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
           FilledButton(
             onPressed: () async {
               await ApiService.post('/families', {'name': nameController.text});
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
               _load();
             },
             child: const Text('Salvar'),

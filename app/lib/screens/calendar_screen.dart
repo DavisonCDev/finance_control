@@ -89,7 +89,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 'event_date': day.toIso8601String().split('T').first,
                 'amount': parseMoney(amountController.text) ?? 0,
               });
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
               _load(day);
             },
             child: const Text('Salvar'),

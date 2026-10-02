@@ -150,7 +150,11 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /invoices — todas as faturas do usuario, por data de vencimento.
 router.get('/invoices', asyncHandler(async (req, res) => {
   const [rows] = await db.query(
-    `SELECT i.*, c.name AS card_name, c.color AS card_color, c.brand
+    `SELECT i.*, c.name AS card_name, c.color AS card_color, c.brand,
+            (SELECT t.time FROM invoice_payments p
+              JOIN transactions t ON t.id = p.transaction_id
+              WHERE p.invoice_id = i.id
+              ORDER BY p.id DESC LIMIT 1) AS paid_time
      FROM card_invoices i
      JOIN credit_cards c ON c.id = i.card_id
      WHERE i.user_id = ? AND i.status <> 'cancelled'
@@ -213,6 +217,8 @@ router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
     }
 
     const paidAt = date || dates.toIsoDate(new Date());
+    const paidTime = time || new Date().toTimeString().slice(0, 8);
+    const paidAtFull = `${paidAt} ${paidTime}`;
 
     const paymentCategoryId = category_id || await ensurePaymentCategory(conn, req.userId);
 
@@ -223,21 +229,21 @@ router.post('/invoices/:invoiceId/pay', asyncHandler(async (req, res) => {
       type: 'expense',
       amount: value,
       date: paidAt,
-      time: time || new Date().toTimeString().slice(0, 8),
+      time: paidTime,
       description: `Pagamento fatura ${invoice.card_name} ${invoice.reference_month}`,
       source: 'invoice_payment',
     });
 
     await conn.query(
       'INSERT INTO invoice_payments (invoice_id, account_id, transaction_id, amount, paid_at) VALUES (?, ?, ?, ?, ?)',
-      [invoice.id, account_id, transaction.id, value, paidAt]
+      [invoice.id, account_id, transaction.id, value, paidAtFull]
     );
 
     const newPaid = round2(Number(invoice.paid_amount) + value);
     const status = newPaid >= Number(invoice.total_amount) ? 'paid' : 'partial';
     await conn.query(
       'UPDATE card_invoices SET paid_amount = ?, status = ?, paid_at = ?, updated_at = NOW() WHERE id = ?',
-      [newPaid, status, status === 'paid' ? paidAt : invoice.paid_at, invoice.id]
+      [newPaid, status, status === 'paid' ? paidAtFull : invoice.paid_at, invoice.id]
     );
 
     const [updated] = await conn.query('SELECT * FROM card_invoices WHERE id = ?', [invoice.id]);
