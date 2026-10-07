@@ -151,6 +151,29 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     );
     if (result == null) return;
     if (result == 'delete') {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Remover previsão?'),
+          content: Text(
+            'A previsão de '
+            '${cat != null ? _catLabel(cat) : b.categoryName} '
+            'será removida deste mês.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remover'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
       await ApiService.delete('/budgets/${b.id}');
     } else {
       final amount = parseMoney(result);

@@ -567,7 +567,8 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
       builder: (context) => AlertDialog(
         title: Text('Excluir ${inv['name']}?'),
         content: const Text(
-          'O investimento será removido. Os lançamentos nas contas são mantidos.',
+          'O investimento e todo o histórico de movimentações serão removidos. '
+          'Os lançamentos nas contas são mantidos.',
         ),
         actions: [
           TextButton(
