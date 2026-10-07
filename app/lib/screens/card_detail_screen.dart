@@ -27,6 +27,11 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   bool loading = true;
   String? error;
 
+  // Fatura exibida no card de compras e cache dos detalhes ja buscados.
+  int? _viewingInvoiceId;
+  bool _loadingDetail = false;
+  final Map<int, Map<String, dynamic>> _invoiceCache = {};
+
   static const _months = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
@@ -75,6 +80,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         currentInvoice =
             ApiService.decode(results[2]) as Map<String, dynamic>;
         loading = false;
+        _invoiceCache.clear();
       });
     } catch (e) {
       if (!mounted) return;
@@ -131,8 +137,54 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     return unpaid.isEmpty ? null : unpaid.first;
   }
 
-  Future<void> _payInvoice() async {
-    final inv = _invoiceToPay;
+  // Faturas que fazem sentido visualizar: todas as nao quitadas com
+  // saldo, mais a em composicao (mesmo zerada). Ordenadas por vencimento.
+  List<dynamic> get _viewableInvoices {
+    final map = <int, dynamic>{};
+    for (final i in invoices) {
+      final remaining =
+          _num(i['remaining'] ?? i['total_amount']);
+      if (i['status'] != 'paid' &&
+          remaining > 0.01 &&
+          i['id'] != null) {
+        map[i['id'] as int] = i;
+      }
+    }
+    final cur = currentInvoice;
+    if (cur != null && cur['id'] != null) map[cur['id'] as int] = cur;
+    return map.values.toList()
+      ..sort(
+        (a, b) => '${a['due_date']}'.compareTo('${b['due_date']}'),
+      );
+  }
+
+  bool _isCurrentInvoice(int? id) =>
+      id != null && id == currentInvoice?['id'];
+
+  // Troca qual fatura esta em exibicao. A em composicao ja vem com as
+  // compras; as demais sao buscadas por mes de referencia e cacheadas.
+  Future<void> _viewInvoice(dynamic inv) async {
+    final id = inv['id'] as int;
+    setState(() {
+      _viewingInvoiceId = id;
+      _loadingDetail =
+          !_isCurrentInvoice(id) && !_invoiceCache.containsKey(id);
+    });
+    if (_isCurrentInvoice(id) || _invoiceCache.containsKey(id)) return;
+    final res = await ApiService.get(
+      '/cards/${widget.cardId}/invoices/${inv['reference_month']}',
+    );
+    if (!mounted) return;
+    setState(() {
+      _loadingDetail = false;
+      if (res.statusCode == 200) {
+        _invoiceCache[id] = ApiService.decode(res) as Map<String, dynamic>;
+      }
+    });
+  }
+
+  Future<void> _payInvoice([dynamic target]) async {
+    final inv = target ?? _invoiceToPay;
     if (inv == null || inv['id'] == null) return;
     final accountsRes = await ApiService.get('/accounts');
     final accounts = ApiService.decode(accountsRes) as List? ?? [];
@@ -371,7 +423,26 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   }
 
   Widget _buildCurrentInvoice() {
-    final inv = currentInvoice;
+    final options = _viewableInvoices;
+    if (currentInvoice == null && options.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    // Padrao: a fatura que esta a pagar (mais antiga a vencer); se nao
+    // houver, a em composicao.
+    final viewingId =
+        options.any((o) => o['id'] == _viewingInvoiceId)
+            ? _viewingInvoiceId
+            : (_invoiceToPay?['id'] ?? currentInvoice?['id']);
+    final summary = options.firstWhere(
+      (o) => o['id'] == viewingId,
+      orElse: () => currentInvoice,
+    );
+    // Detalhe com as compras: a em composicao ja vem carregada; as
+    // demais vem do cache (buscadas ao trocar o seletor).
+    final detail = _isCurrentInvoice(viewingId)
+        ? currentInvoice
+        : _invoiceCache[viewingId];
+    final inv = detail ?? summary;
     if (inv == null) return const SizedBox.shrink();
     final transactions = inv['transactions'] as List? ?? [];
     final remaining = _num(inv['remaining']);
@@ -419,6 +490,32 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
             ),
             const SizedBox(height: 8),
             Text(dueInfo, style: Theme.of(context).textTheme.bodySmall),
+            // Quando ha mais de uma fatura relevante, deixa claro qual
+            // esta em exibicao: a que vence primeiro (a pagar) ou a que
+            // ainda esta recebendo compras (em composicao).
+            if (options.length > 1) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  segments: [
+                    for (final o in options)
+                      ButtonSegment(
+                        value: o['id'] as int,
+                        label: Text(
+                          _isCurrentInvoice(o['id'] as int)
+                              ? 'Em composição'
+                              : 'Vence ${fmtDate(o['due_date'])}',
+                        ),
+                      ),
+                  ],
+                  selected: {viewingId as int},
+                  onSelectionChanged: (s) => _viewInvoice(
+                    options.firstWhere((o) => o['id'] == s.first),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [
@@ -462,7 +559,12 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 ),
               ),
             ],
-            if (transactions.isNotEmpty) ...[
+            if (_loadingDetail)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (transactions.isNotEmpty) ...[
               const Divider(height: 24),
               Text(
                 'Compras (${transactions.length})',
@@ -508,18 +610,16 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Text('Nenhuma compra nesta fatura.'),
               ),
-            if (_invoiceToPay != null) ...[
+            if (status != 'paid' && remaining > 0.01) ...[
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.payment),
                   label: Text(
-                    'Pagar fatura de '
-                    '${fmtDate(_invoiceToPay['due_date'])} '
-                    '(${_money(_invoiceToPay['remaining'])})',
+                    'Pagar esta fatura (${_money(remaining)})',
                   ),
-                  onPressed: _payInvoice,
+                  onPressed: () => _payInvoice(inv),
                 ),
               ),
             ],
