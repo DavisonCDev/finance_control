@@ -724,7 +724,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               text: paid
                   ? '${paidTime != null ? '$paidTime • ' : ''}Paga'
                   : remaining < amount
-                      ? 'Parcial — restam R\$ ${fmtMoney(remaining)}'
+                      ? 'Parcial — pago R\$ ${fmtMoney(amount - remaining)} • vence $dueStr'
                       : 'Vence $dueStr',
             ),
             if (overdue)
@@ -739,7 +739,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         ),
       ),
       trailing: Text(
-        '-R\$ ${fmtMoney(amount)}',
+        '-R\$ ${fmtMoney(paid ? amount : remaining)}',
         style: const TextStyle(
           color: Colors.deepPurple,
           fontWeight: FontWeight.bold,

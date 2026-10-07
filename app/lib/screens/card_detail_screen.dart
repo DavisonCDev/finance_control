@@ -4,6 +4,7 @@ import '../models/transaction.dart';
 import 'card_invoices_screen.dart';
 import 'new_transaction_screen.dart';
 import '../utils/formatters.dart';
+import '../utils/money_parser.dart';
 
 class CardDetailScreen extends StatefulWidget {
   final int cardId;
@@ -137,6 +138,9 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     final accounts = ApiService.decode(accountsRes) as List? ?? [];
     if (accounts.isEmpty || !mounted) return;
     int? selectedAccountId;
+    bool payFull = true;
+    final remaining = _num(inv['remaining']);
+    final amountCtrl = TextEditingController(text: remaining.toStringAsFixed(2).replaceAll('.', ','));
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -155,9 +159,35 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Total restante: ${_money(inv['remaining'])}',
+                'Total restante: ${_money(remaining)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 12),
+              // Total quita a fatura; parcial abate o valor digitado e
+              // libera o equivalente no limite.
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('Valor total')),
+                  ButtonSegment(value: false, label: Text('Parcial')),
+                ],
+                selected: {payFull},
+                onSelectionChanged: (s) =>
+                    setStateDialog(() => payFull = s.first),
+              ),
+              if (!payFull) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [MoneyInputFormatter()],
+                  decoration: InputDecoration(
+                    labelText: 'Valor do pagamento',
+                    prefixText: 'R\$ ',
+                    helperText: 'Máx. ${_money(remaining)}',
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               DropdownButtonFormField<int?>(
                 initialValue: selectedAccountId,
@@ -194,10 +224,12 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
       ),
     );
     if (confirmed != true || selectedAccountId == null) return;
+    final amount = payFull ? remaining : parseMoney(amountCtrl.text);
+    if (amount == null || amount <= 0 || amount > remaining) return;
 
     final res = await ApiService.post(
       '/cards/invoices/${inv['id']}/pay',
-      {'account_id': selectedAccountId, 'amount': inv['remaining']},
+      {'account_id': selectedAccountId, 'amount': amount},
     );
     if (!mounted) return;
     if (res.statusCode == 200 || res.statusCode == 201) {
@@ -538,7 +570,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                   title: Text(_monthLabel(i['reference_month']?.toString())),
                   subtitle: Text('Vence ${fmtDate(i['due_date'])}'),
                   trailing: Text(
-                    _money(i['total_amount']),
+                    _money(i['remaining'] ?? i['total_amount']),
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -555,7 +587,8 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                     _money(
                       upcoming.fold<double>(
                         0,
-                        (sum, i) => sum + _num(i['total_amount']),
+                        (sum, i) =>
+                            sum + _num(i['remaining'] ?? i['total_amount']),
                       ),
                     ),
                     style: TextStyle(

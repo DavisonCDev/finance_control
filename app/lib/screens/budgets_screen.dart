@@ -705,6 +705,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     final remaining = (inv['remaining'] as num?)?.toDouble() ?? 0;
     if (remaining <= 0 || accounts.isEmpty) return;
     int? accountId;
+    bool payFull = true;
     final amountCtrl =
         TextEditingController(text: fmtMoney(remaining));
     final ok = await showDialog<bool>(
@@ -722,17 +723,30 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: amountCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [MoneyInputFormatter()],
-                decoration: const InputDecoration(
-                  labelText: 'Valor do pagamento',
-                  prefixText: 'R\$ ',
-                  helperText: 'Deixe o total para quitar a fatura',
-                ),
+              // Total quita; parcial abate o valor e libera limite.
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('Valor total')),
+                  ButtonSegment(value: false, label: Text('Parcial')),
+                ],
+                selected: {payFull},
+                onSelectionChanged: (s) =>
+                    setDialog(() => payFull = s.first),
               ),
+              if (!payFull) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [MoneyInputFormatter()],
+                  decoration: InputDecoration(
+                    labelText: 'Valor do pagamento',
+                    prefixText: 'R\$ ',
+                    helperText: 'Máx. R\$ ${fmtMoney(remaining)}',
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
                 initialValue: accountId,
@@ -765,8 +779,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       ),
     );
     if (ok != true || accountId == null) return;
-    final amount = parseMoney(amountCtrl.text);
-    if (amount == null || amount <= 0) return;
+    final amount = payFull ? remaining : parseMoney(amountCtrl.text);
+    if (amount == null || amount <= 0 || amount > remaining) return;
     await ApiService.post('/cards/invoices/${inv['id']}/pay', {
       'account_id': accountId,
       'amount': amount,
@@ -1060,9 +1074,16 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   // Cartao expansivel: cabecalho mostra nome + total das faturas do
   // mes; expandindo aparecem as faturas com as categorias das compras.
   Widget _buildCardSection(String cardName, List<dynamic> invoices) {
+    // Valor vigente da fatura: quitada mostra o total; em aberto/parcial
+    // mostra o que ainda falta pagar.
     final cardTotal = invoices.fold<double>(
       0,
-      (s, i) => s + ((i['total_amount'] as num?)?.toDouble() ?? 0),
+      (s, i) => s +
+          (i['status'] == 'paid'
+              ? (i['total_amount'] as num?)?.toDouble() ?? 0
+              : (i['remaining'] as num?)?.toDouble() ??
+                  ((i['total_amount'] as num?)?.toDouble() ?? 0) -
+                      ((i['paid_amount'] as num?)?.toDouble() ?? 0)),
     );
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
@@ -1142,7 +1163,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'R\$ ${fmtMoney(total)}',
+            'R\$ ${fmtMoney(isPaid ? total : remaining)}',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           if (remaining > 0.01)

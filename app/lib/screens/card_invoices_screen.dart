@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../models/transaction.dart';
 import 'new_transaction_screen.dart';
 import '../utils/formatters.dart';
+import '../utils/money_parser.dart';
 
 class CardInvoicesScreen extends StatefulWidget {
   final int cardId;
@@ -52,6 +53,12 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
     final accountsRes = await ApiService.get('/accounts');
     final accounts = ApiService.decode(accountsRes) as List;
     int? selectedAccountId;
+    bool payFull = true;
+    final remaining =
+        (invoice['remaining'] as num?)?.toDouble() ??
+            (invoice['total_amount'] as num?)?.toDouble() ??
+            0;
+    final amountCtrl = TextEditingController(text: fmtMoney(remaining));
 
     if (!mounted) return;
     await showDialog(
@@ -61,19 +68,51 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
           title: const Text('Pagar fatura'),
           content: SizedBox(
             width: double.maxFinite,
-            child: DropdownButtonFormField<int?>(
-              initialValue: selectedAccountId,
-              hint: const Text('Selecione a conta'),
-              decoration: const InputDecoration(labelText: 'Conta para débito'),
-              items: accounts
-                  .map<DropdownMenuItem<int?>>(
-                    (a) => DropdownMenuItem(
-                      value: a['id'] as int,
-                      child: Text(a['name'].toString()),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('Valor total')),
+                    ButtonSegment(value: false, label: Text('Parcial')),
+                  ],
+                  selected: {payFull},
+                  onSelectionChanged: (s) =>
+                      setStateDialog(() => payFull = s.first),
+                ),
+                if (!payFull) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: amountCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                  )
-                  .toList(),
-              onChanged: (v) => setStateDialog(() => selectedAccountId = v),
+                    inputFormatters: [MoneyInputFormatter()],
+                    decoration: InputDecoration(
+                      labelText: 'Valor do pagamento',
+                      prefixText: 'R\$ ',
+                      helperText: 'Máx. R\$ ${fmtMoney(remaining)}',
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int?>(
+                  initialValue: selectedAccountId,
+                  hint: const Text('Selecione a conta'),
+                  decoration:
+                      const InputDecoration(labelText: 'Conta para débito'),
+                  items: accounts
+                      .map<DropdownMenuItem<int?>>(
+                        (a) => DropdownMenuItem(
+                          value: a['id'] as int,
+                          child: Text(a['name'].toString()),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) =>
+                      setStateDialog(() => selectedAccountId = v),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -91,12 +130,20 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
                   );
                   return;
                 }
+                final amount =
+                    payFull ? remaining : parseMoney(amountCtrl.text);
+                if (amount == null || amount <= 0 || amount > remaining) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Valor inválido.')),
+                  );
+                  return;
+                }
                 Navigator.pop(context);
                 final res = await ApiService.post(
                   '/cards/invoices/${invoice['id']}/pay',
                   {
                     'account_id': selectedAccountId,
-                    'amount': invoice['remaining'],
+                    'amount': amount,
                   },
                 );
                 if (res.statusCode == 200 || res.statusCode == 201) {
