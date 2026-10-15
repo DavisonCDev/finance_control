@@ -65,27 +65,28 @@ async function childrenOf(categoryIds) {
   return map;
 }
 
-// Total gasto por categoria no intervalo. So conta despesa efetivamente paga:
-// compra no cartao nao e gasto aqui — ela vira gasto quando a fatura e paga,
-// e pagamento de fatura e contabilizado na secao de cartao, nao na categoria.
+// Total realizado por categoria no intervalo, por tipo: para orcamentos de
+// despesa soma despesas pagas; para orcamentos de receita soma receitas
+// recebidas. Chave: "tipo:categoria". Compra no cartao nao e gasto aqui —
+// ela vira gasto quando a fatura e paga; pagamento de fatura tambem fica fora.
 async function spentByCategory(userId, { start, end }) {
   const visibility = await scope.visibilityClause(userId, 't');
   const [rows] = await db.query(
-    `SELECT t.category_id, COALESCE(SUM(t.amount), 0) AS spent
+    `SELECT t.category_id, t.type, COALESCE(SUM(t.amount), 0) AS spent
      FROM transactions t
      WHERE ${visibility.sql}
-       AND t.type = 'expense' AND t.deleted_at IS NULL
+       AND t.type IN ('expense', 'income') AND t.deleted_at IS NULL
        AND t.status <> 'cancelled'
        AND t.is_paid = TRUE
        AND t.card_id IS NULL
        AND (t.source IS NULL OR t.source <> 'invoice_payment')
        AND t.date BETWEEN ? AND ?
-     GROUP BY t.category_id`,
+     GROUP BY t.category_id, t.type`,
     [...visibility.params, start, end]
   );
 
   const map = new Map();
-  for (const row of rows) map.set(Number(row.category_id), Number(row.spent));
+  for (const row of rows) map.set(`${row.type}:${Number(row.category_id)}`, Number(row.spent));
   return map;
 }
 
@@ -113,6 +114,7 @@ function decorate(budget, spent, daysLeft) {
     family_id: budget.family_id,
     notified_near_at: budget.notified_near_at,
     notified_over_at: budget.notified_over_at,
+    category_type: budget.category_type || 'expense',
     category_name: budget.category_name,
     category_color: budget.category_color,
     category_icon: budget.category_icon,
@@ -139,7 +141,7 @@ async function loadBudgetsWithSpent(userId, month, firstDay, { familyId = null, 
   }
 
   let sql = `SELECT b.*, CASE WHEN pc.name IS NULL THEN c.name ELSE CONCAT(pc.name, ' › ', c.name) END AS category_name,
-                    c.color AS category_color, c.icon AS category_icon
+                    c.color AS category_color, c.icon AS category_icon, c.type AS category_type
              FROM budgets b
              JOIN categories c ON c.id = b.category_id
              LEFT JOIN categories pc ON pc.id = c.parent_id
@@ -164,8 +166,9 @@ async function loadBudgetsWithSpent(userId, month, firstDay, { familyId = null, 
   const daysLeft = daysLeftIn(bounds);
   const rows = budgets.map(budget => {
     const categoryId = Number(budget.category_id);
-    let spent = spentMap.get(categoryId) || 0;
-    for (const childId of children.get(categoryId) || []) spent += spentMap.get(childId) || 0;
+    const type = budget.category_type || 'expense';
+    let spent = spentMap.get(`${type}:${categoryId}`) || 0;
+    for (const childId of children.get(categoryId) || []) spent += spentMap.get(`${type}:${childId}`) || 0;
     return decorate(budget, Number(spent.toFixed(2)), daysLeft);
   });
 
@@ -195,8 +198,12 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const { bounds, rows } = await loadBudgetsWithSpent(req.userId, month, req.user.first_day_of_month, { familyId });
 
-  const budgeted = rows.reduce((sum, r) => sum + r.amount, 0);
-  const spent = rows.reduce((sum, r) => sum + r.spent, 0);
+  // Previsoes de despesa alimentam forecast_total; as de receita ficam
+  // separadas para nao inflar o "previsto a gastar".
+  const budgeted = rows.filter(r => r.category_type !== 'income').reduce((sum, r) => sum + r.amount, 0);
+  const spent = rows.filter(r => r.category_type !== 'income').reduce((sum, r) => sum + r.spent, 0);
+  const incomeBudgeted = rows.filter(r => r.category_type === 'income').reduce((sum, r) => sum + r.amount, 0);
+  const incomeSpent = rows.filter(r => r.category_type === 'income').reduce((sum, r) => sum + r.spent, 0);
 
   const [invoiceRows] = await db.query(
     `SELECT i.id, i.card_id, i.reference_month, i.total_amount, i.paid_amount,
@@ -285,6 +292,8 @@ router.get('/', asyncHandler(async (req, res) => {
     totals: {
       budgeted: Number(budgeted.toFixed(2)),
       spent: Number(spent.toFixed(2)),
+      income_budgeted: Number(incomeBudgeted.toFixed(2)),
+      income_spent: Number(incomeSpent.toFixed(2)),
       card_forecast: Number(cardForecast.toFixed(2)),
       card_spent: Number(cardSpent.toFixed(2)),
       forecast_total: Number(forecastTotal.toFixed(2)),
@@ -410,6 +419,8 @@ router.post('/check-alerts', asyncHandler(async (req, res) => {
   let alerts = 0;
 
   for (const budget of rows) {
+    // Estouro so se aplica a despesa: receber alem da previsao nao e alerta.
+    if (budget.category_type === 'income') continue;
     if (budget.percent >= 100) {
       const id = await notify({
         userId: req.userId,
@@ -460,7 +471,9 @@ router.post('/', asyncHandler(async (req, res) => {
     [category_id, req.userId]
   );
   if (categories.length === 0) throw Object.assign(new Error('Categoria não encontrada.'), { status: 404 });
-  if (categories[0].type !== 'expense') throw badRequest('Só é possível orçar categorias de despesa.');
+  if (categories[0].type !== 'expense' && categories[0].type !== 'income') {
+    throw badRequest('Só é possível prever categorias de despesa ou receita.');
+  }
 
   if (family_id) await scope.assertCanUseFamily(req.userId, family_id);
 

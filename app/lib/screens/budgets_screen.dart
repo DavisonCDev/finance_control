@@ -52,6 +52,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Transaction> monthTransactions = [];
   List<Account> accounts = [];
   List<Category> expenseCategories = [];
+  List<Category> incomeCategories = [];
   bool loading = true;
   String month = DateTime.now().toIso8601String().substring(0, 7);
   Map<String, dynamic> totals = {};
@@ -69,9 +70,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   Future<void> _load() async {
-    final [bRes, cRes, tRes, aRes] = await Future.wait([
+    final [bRes, cRes, iRes, tRes, aRes] = await Future.wait([
       ApiService.get('/budgets?month=$month'),
       ApiService.get('/categories?type=expense&flat=true'),
+      ApiService.get('/categories?type=income&flat=true'),
       ApiService.get('/transactions?month=$month&limit=1000&order=date_asc'),
       ApiService.get('/accounts'),
     ]);
@@ -94,7 +96,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       expenseCategories = (ApiService.decode(cRes) as List)
           .map((e) => Category.fromJson(e))
           .toList();
-      _catById = {for (final c in expenseCategories) c.id: c};
+      incomeCategories = (ApiService.decode(iRes) as List)
+          .map((e) => Category.fromJson(e))
+          .toList();
+      _catById = {
+        for (final c in [...expenseCategories, ...incomeCategories]) c.id: c,
+      };
       expenseCategories.sort(
         (a, b) =>
             _catLabel(a).toLowerCase().compareTo(_catLabel(b).toLowerCase()),
@@ -183,21 +190,23 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     _load();
   }
 
-  // Cria uma previsao manual para uma categoria que ainda nao tem.
+  // Cria uma previsao manual (despesa ou receita) para uma categoria
+  // que ainda nao tem.
   Future<void> _addBudget() async {
     final used = budgets.map((b) => b.categoryId).toSet();
-    List<Category> subsOf(Category p) => expenseCategories
+    List<Category> subsOf(List<Category> cats, Category p) => cats
         .where((c) => c.parentId == p.id && !used.contains(c.id))
         .toList();
     // Pai aparece se ele mesmo ou alguma sub ainda nao tem previsao.
-    final parents = expenseCategories
+    List<Category> parentsOf(List<Category> cats) => cats
         .where(
           (c) =>
               c.parentId == null &&
-              (!used.contains(c.id) || subsOf(c).isNotEmpty),
+              (!used.contains(c.id) || subsOf(cats, c).isNotEmpty),
         )
         .toList();
-    if (parents.isEmpty) {
+    if (parentsOf(expenseCategories).isEmpty &&
+        parentsOf(incomeCategories).isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Todas as categorias já têm previsão neste mês.'),
@@ -205,6 +214,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       );
       return;
     }
+    String kind = 'expense';
     int? parentId;
     int? subId;
     final controller = TextEditingController();
@@ -221,14 +231,39 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                   ),
                 ],
               );
-          final subs =
-              parentId == null ? <Category>[] : subsOf(_catById[parentId]!);
+          final cats =
+              kind == 'income' ? incomeCategories : expenseCategories;
+          final parents = parentsOf(cats);
+          final subs = parentId == null
+              ? <Category>[]
+              : subsOf(cats, _catById[parentId]!);
           final parentUsed = used.contains(parentId);
           return AlertDialog(
             title: const Text('Nova previsão'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'expense',
+                      label: Text('Despesa'),
+                      icon: Icon(Icons.arrow_downward, size: 16),
+                    ),
+                    ButtonSegment(
+                      value: 'income',
+                      label: Text('Receita'),
+                      icon: Icon(Icons.arrow_upward, size: 16),
+                    ),
+                  ],
+                  selected: {kind},
+                  onSelectionChanged: (s) => setDialog(() {
+                    kind = s.first;
+                    parentId = null;
+                    subId = null;
+                  }),
+                ),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   initialValue: parentId,
                   isExpanded: true,
@@ -393,10 +428,16 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     );
   }
 
-  // Previsoes agrupadas pela categoria-pai, em ordem alfabetica.
-  List<_BudgetGroup> get _budgetGroups {
+  // Tipo da categoria da previsao (expense quando a categoria nao esta
+  // carregada — compatibilidade com dados antigos).
+  String _budgetType(Budget b) => _catById[b.categoryId]?.type ?? 'expense';
+
+  // Previsoes de um tipo (despesa ou receita) agrupadas pela
+  // categoria-pai, em ordem alfabetica.
+  List<_BudgetGroup> _budgetGroupsOf(String type) {
     final groups = <int, _BudgetGroup>{};
     for (final b in budgets) {
+      if (_budgetType(b) != type) continue;
       final cat = _catById[b.categoryId];
       final parentId = cat?.parentId ?? b.categoryId;
       groups.putIfAbsent(parentId, () => _BudgetGroup(parentId, []))
@@ -412,6 +453,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     return list;
   }
 
+  List<_BudgetGroup> get _expenseGroups => _budgetGroupsOf('expense');
+  List<_BudgetGroup> get _incomeGroups => _budgetGroupsOf('income');
+
   String _groupLabel(_BudgetGroup g) =>
       _catById[g.categoryId]?.name ?? g.items.first.categoryName;
 
@@ -422,6 +466,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   Widget _budgetTile(Budget b, {bool child = false, String? label}) {
     final cat = _catById[b.categoryId];
     final color = cat?.getColor() ?? b.getColor();
+    final income = _budgetType(b) == 'income';
     return ListTile(
       onTap: () => _editBudget(b),
       contentPadding: child ? const EdgeInsets.only(left: 56) : null,
@@ -436,7 +481,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
               ),
             ),
       title: Text(label ?? b.categoryName),
-      subtitle: Text('Pago: R\$ ${fmtMoney(b.spent)}'),
+      subtitle: Text(
+        '${income ? 'Recebido' : 'Pago'}: R\$ ${fmtMoney(b.spent)}',
+      ),
       trailing: Text(
         'R\$ ${fmtMoney(b.amount)}',
         style: const TextStyle(fontWeight: FontWeight.bold),
@@ -457,7 +504,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       ),
       title: Text(_groupLabel(g)),
       subtitle: Text(
-        'Pago: R\$ ${fmtMoney(g.spent)} • Previsto: R\$ ${fmtMoney(g.amount)}',
+        '${_budgetType(g.items.first) == 'income' ? 'Recebido' : 'Pago'}: '
+        'R\$ ${fmtMoney(g.spent)} • Previsto: R\$ ${fmtMoney(g.amount)}',
       ),
       children: [
         for (final b in g.items)
@@ -494,13 +542,32 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     return t.isIncome ? t.amount : -t.amount;
   }
 
+  // Quanto dos lancamentos do mes ja cobre uma previsao: soma tudo que
+  // cai na categoria (ou nas subcategorias dela), pago ou pendente.
+  // Compras no cartao tambem cobrem — elas entram na projecao pela
+  // linha da fatura, entao nao podem figurar duas vezes.
+  double _coveredFor(Budget b) {
+    final income = _budgetType(b) == 'income';
+    return monthTransactions
+        .where(
+          (t) =>
+              (income ? t.isIncome : t.isExpense) &&
+              (t.categoryId == b.categoryId ||
+                  _catById[t.categoryId]?.parentId == b.categoryId),
+        )
+        .fold(0.0, (s, t) => s + t.amount);
+  }
+
   // Linha do tempo do mes em ordem cronologica: lancamentos que mexem
-  // no saldo + restante de faturas ainda nao quitadas no vencimento.
+  // no saldo + restante de faturas ainda nao quitadas + restante ainda
+  // nao coberto de cada previsao (lancado no fim do mes).
   List<_FlowItem> get _flowItems {
     double invoiceRemaining(dynamic inv) =>
         (inv['remaining'] as num?)?.toDouble() ??
         ((inv['total_amount'] as num?)?.toDouble() ?? 0) -
             ((inv['paid_amount'] as num?)?.toDouble() ?? 0);
+    final year = int.parse(month.substring(0, 4));
+    final monthEnd = DateTime(year, int.parse(month.substring(5, 7)) + 1, 0);
     final items = <_FlowItem>[
       for (final t in monthTransactions)
         if (_effectOnBalance(t) != 0)
@@ -523,13 +590,30 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             pending: true,
             subtitle: 'Vencimento da fatura',
           ),
+      // Previsoes: cada lancamento da categoria vai cobrindo o previsto;
+      // o que sobrar entra como linha de projecao no fim do mes. Se os
+      // lancamentos excederem o previsto, o restante zera e ficam so os
+      // lancamentos reais.
+      for (final b in budgets)
+        if (b.amount - _coveredFor(b) > 0.004)
+          _FlowItem(
+            date: monthEnd,
+            time: '23:59',
+            label: 'Previsão: ${(_catById[b.categoryId] != null ? _catLabel(_catById[b.categoryId]!) : b.categoryName)}',
+            effect: (_budgetType(b) == 'income' ? 1 : -1) *
+                (b.amount - _coveredFor(b)),
+            pending: true,
+            subtitle:
+                'restam de R\$ ${fmtMoney(b.amount)} previstos',
+          ),
     ];
     // Cronologico por data + horario; itens sem horario (faturas)
     // entram por ultimo no dia.
     items.sort((a, b) {
       final d = a.date.compareTo(b.date);
       if (d != 0) return d;
-      return (a.time ?? '23:59').compareTo(b.time ?? '23:59');
+      final t = (a.time ?? '23:59').compareTo(b.time ?? '23:59');
+      return t != 0 ? t : a.label.compareTo(b.label);
     });
     return items;
   }
@@ -825,8 +909,18 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   Widget build(BuildContext context) {
     final previstoTotal = (totals['forecast_total'] as num?)?.toDouble() ?? 0;
     final percent = (totals['percent'] as num?)?.toDouble() ?? 0;
+    // Receita prevista = receitas ja lancadas + o que ainda falta
+    // receber das previsoes de receita (cada receita lancada cobre a
+    // previsao da categoria; sobra entra como projecao).
     final receitaPrevista =
-        (totals['income_forecast'] as num?)?.toDouble() ?? 0;
+        ((totals['income_forecast'] as num?)?.toDouble() ?? 0) +
+            budgets
+                .where((b) => _budgetType(b) == 'income')
+                .fold(
+                  0.0,
+                  (s, b) =>
+                      s + (b.amount - _coveredFor(b)).clamp(0.0, b.amount),
+                );
     // Planejado: abertura + tudo que esta previsto entrar/sair no mes.
     final saldoFinalPrevisto =
         _openingBalance + receitaPrevista - previstoTotal;
@@ -1024,7 +1118,19 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                             'ou manualmente pelo botão acima.',
                           ),
                         ),
-                      ..._budgetGroups.map(_budgetGroupTile),
+                      ..._expenseGroups.map(_budgetGroupTile),
+                      if (_incomeGroups.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Receitas previstas',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        ..._incomeGroups.map(_budgetGroupTile),
+                      ],
                       if (_invoicesByCard.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Text(

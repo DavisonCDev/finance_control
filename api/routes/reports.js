@@ -22,7 +22,7 @@ router.get('/monthly', asyncHandler(async (req, res) => {
     `SELECT b.*, c.name as category_name, c.color as category_color
      FROM budgets b
      JOIN categories c ON b.category_id = c.id
-     WHERE b.user_id = ? AND b.budget_month = ?`,
+     WHERE b.user_id = ? AND b.budget_month = ? AND c.type = 'expense'`,
     [req.userId, targetMonth]
   );
 
