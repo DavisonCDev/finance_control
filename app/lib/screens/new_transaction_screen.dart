@@ -244,7 +244,8 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
     } else if (isRecurring && type != 'transfer') {
       // Despesa/receita recorrente: o backend gera as transacoes e a previsao.
       res = await ApiService.post('/recurring', {
-        'account_id': selectedAccountId,
+        'account_id': selectedCardId == null ? selectedAccountId : null,
+        'card_id': selectedCardId,
         'category_id': selectedCategoryId,
         'type': type,
         'amount': amount,
@@ -617,7 +618,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                         onChanged: (v) => setState(() => selectedCardId = v),
                       ),
                       const SizedBox(height: 8),
-                      if (!isEditing) ...[
+                      if (!isEditing && !isRecurring) ...[
                         SegmentedButton<bool>(
                           segments: const [
                             ButtonSegment(
@@ -636,7 +637,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                               setState(() => payInstallments = s.first),
                         ),
                       ],
-                      if (payInstallments && !isEditing) ...[
+                      if (payInstallments && !isEditing && !isRecurring) ...[
                         const SizedBox(height: 8),
                         TextField(
                           controller: installmentsController,
@@ -647,12 +648,18 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                         ),
                       ],
                     ],
-                    if (type != 'transfer' && !isEditing && selectedCardId == null)
+                    // Recorrencia em cartao gera a compra dentro da fatura
+                    // todo mes; em conta gera o lancamento + a previsao.
+                    if (type != 'transfer' && !isEditing)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Repetir (recorrente)'),
                         subtitle: isRecurring
-                            ? const Text('Gera lançamentos e previsões futuras')
+                            ? Text(
+                                payWithCard
+                                    ? 'Gera a compra na fatura todo mês'
+                                    : 'Gera lançamentos e previsões futuras',
+                              )
                             : null,
                         value: isRecurring,
                         onChanged: (v) => setState(() => isRecurring = v),

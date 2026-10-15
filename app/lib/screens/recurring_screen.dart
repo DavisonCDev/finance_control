@@ -17,6 +17,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
   List<dynamic> items = [];
   List<Account> accounts = [];
   List<Category> categories = [];
+  List<dynamic> cards = [];
   bool loading = true;
 
   @override
@@ -73,7 +74,9 @@ class _RecurringScreenState extends State<RecurringScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Confirmar débito'),
         content: Text(
-          'A recorrência "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} prevista para ${fmtDate(r['next_date'])} foi realizada?',
+          r['card_id'] != null
+              ? 'Lançar "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} na fatura do cartão?'
+              : 'A recorrência "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} prevista para ${fmtDate(r['next_date'])} foi realizada?',
         ),
         actions: [
           TextButton(
@@ -117,6 +120,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
     );
     String type = isEditing ? r['type'] : 'expense';
     int? accountId = isEditing ? r['account_id'] : null;
+    int? cardId = isEditing ? r['card_id'] : null;
     int? categoryId = isEditing ? r['category_id'] : null;
     String frequency = isEditing ? r['frequency'] : 'monthly';
     DateTime startDate = isEditing
@@ -180,7 +184,48 @@ class _RecurringScreenState extends State<RecurringScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (accounts.isNotEmpty)
+                  // Despesa pode ser recorrente em conta ou no cartao —
+                  // no cartao cada mes vira compra dentro da fatura.
+                  if (type == 'expense' && cards.isNotEmpty)
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Conta'),
+                          icon: Icon(Icons.account_balance, size: 16),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          label: Text('Cartão'),
+                          icon: Icon(Icons.credit_card, size: 16),
+                        ),
+                      ],
+                      selected: {cardId != null},
+                      onSelectionChanged: (s) => setDialogState(() {
+                        if (s.first) {
+                          cardId ??= cards.first['id'] as int;
+                          accountId = null;
+                        } else {
+                          cardId = null;
+                        }
+                      }),
+                    ),
+                  const SizedBox(height: 12),
+                  if (cardId != null)
+                    DropdownButtonFormField<int>(
+                      initialValue: cardId,
+                      decoration:
+                          const InputDecoration(labelText: 'Cartão'),
+                      items: [
+                        for (final c in cards)
+                          DropdownMenuItem(
+                            value: c['id'] as int,
+                            child: Text('${c['name']}'),
+                          ),
+                      ],
+                      onChanged: (v) => setDialogState(() => cardId = v),
+                    )
+                  else if (accounts.isNotEmpty)
                     DropdownButtonFormField<int>(
                       initialValue: accountId,
                       decoration: const InputDecoration(labelText: 'Conta'),
@@ -251,7 +296,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                 onPressed: () async {
                   if (descriptionController.text.isEmpty ||
                       amountController.text.isEmpty ||
-                      accountId == null ||
+                      (accountId == null && cardId == null) ||
                       categoryId == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -278,7 +323,8 @@ class _RecurringScreenState extends State<RecurringScreen> {
                   final formattedStart =
                       '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
                   final body = {
-                    'account_id': accountId,
+                    'account_id': cardId == null ? accountId : null,
+                    'card_id': cardId,
                     'category_id': categoryId,
                     'type': type,
                     'amount': amount,
@@ -316,9 +362,10 @@ class _RecurringScreenState extends State<RecurringScreen> {
   }
 
   Future<void> _loadMetadata() async {
-    final [aRes, cRes] = await Future.wait([
+    final [aRes, cRes, cardRes] = await Future.wait([
       ApiService.get('/accounts'),
       ApiService.get('/categories'),
+      ApiService.get('/cards'),
     ]);
     setState(() {
       accounts = (ApiService.decode(aRes) as List)
@@ -327,6 +374,9 @@ class _RecurringScreenState extends State<RecurringScreen> {
       categories = (ApiService.decode(cRes) as List)
           .map((e) => Category.fromJson(e))
           .toList();
+      cards = ApiService.decode(cardRes) is List
+          ? ApiService.decode(cardRes) as List
+          : [];
     });
   }
 
@@ -351,7 +401,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                   title: Text(r['description'] ?? 'Recorrente'),
                   subtitle: Text(
                     'R\$ ${fmtMoney((r['amount'] as num))} • Próxima: ${fmtDate(r['next_date'])}\n'
-                    '${r['account_name'] ?? ''} • ${r['category_name'] ?? ''}',
+                    '${r['card_name'] ?? r['account_name'] ?? ''} • ${r['category_name'] ?? ''}',
                   ),
                   isThreeLine: true,
                   trailing: Row(

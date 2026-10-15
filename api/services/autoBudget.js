@@ -47,7 +47,8 @@ async function ensureBudgetForTransaction(userId, tx, conn = null) {
 }
 
 async function ensureBudgetsForRecurring(userId, recurring) {
-  if (recurring.type !== 'expense' || !recurring.category_id) return;
+  // Recorrencia em cartao nao cria previsao em conta: a fatura projeta.
+  if (recurring.type !== 'expense' || recurring.card_id || !recurring.category_id) return;
 
   const start = new Date(recurring.start_date);
   const end = recurring.end_date

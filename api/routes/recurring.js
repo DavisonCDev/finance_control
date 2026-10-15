@@ -23,11 +23,12 @@ router.use(authenticate);
 router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT r.*, CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END as category_name, a.name as account_name
+      `SELECT r.*, CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END as category_name, a.name as account_name, cc.name as card_name
        FROM recurring_transactions r
        LEFT JOIN categories c ON r.category_id = c.id
        LEFT JOIN categories p ON p.id = c.parent_id
        LEFT JOIN accounts a ON r.account_id = a.id
+       LEFT JOIN credit_cards cc ON r.card_id = cc.id
        WHERE r.user_id = ? AND r.active = TRUE
        ORDER BY r.next_date`,
       [req.userId]
@@ -39,15 +40,18 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { account_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
+  const { account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
   if (!type || !amount || !start_date || !frequency) {
     return res.status(400).json({ error: 'Tipo, valor, data início e frequência são obrigatórios.' });
+  }
+  if (!account_id && !card_id) {
+    return res.status(400).json({ error: 'Informe a conta ou o cartão.' });
   }
 
   try {
     const [result] = await db.query(
-      'INSERT INTO recurring_transactions (user_id, account_id, category_id, type, amount, description, frequency, start_date, end_date, next_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [req.userId, account_id, category_id, type, amount, description, frequency, start_date, end_date, start_date]
+      'INSERT INTO recurring_transactions (user_id, account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date, next_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.userId, card_id ? null : account_id, card_id || null, category_id, type, amount, description, frequency, start_date, end_date, start_date]
     );
     const [rows] = await db.query('SELECT * FROM recurring_transactions WHERE id = ?', [result.insertId]);
 
@@ -91,7 +95,7 @@ function monthsBetween(startDate, endDate, defaultYears = 5) {
 
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { account_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
+  const { account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
 
   try {
     const [rows] = await db.query(
@@ -106,11 +110,11 @@ router.put('/:id', async (req, res) => {
 
     const [result] = await db.query(
       `UPDATE recurring_transactions
-       SET account_id = ?, category_id = ?, type = ?, amount = ?, description = ?,
+       SET account_id = ?, card_id = ?, category_id = ?, type = ?, amount = ?, description = ?,
            frequency = ?, start_date = ?, end_date = ?, next_date = ?
        WHERE id = ?`,
       [
-        account_id, category_id, type, amount, description,
+        card_id ? null : account_id, card_id || null, category_id, type, amount, description,
         frequency, start_date, end_date,
         new Date(start_date) <= new Date(before.start_date) ? start_date : before.next_date,
         id
@@ -118,12 +122,17 @@ router.put('/:id', async (req, res) => {
     );
 
     // Ajusta previsões: remove valores antigos e aplica novos.
+    // Recorrencia em cartao nao tem previsao em conta — a fatura projeta.
     try {
-      for (const month of oldMonths) {
-        await ensureBudget(req.userId, before.category_id, month, -Number(before.amount));
+      if (before.type === 'expense' && !before.card_id) {
+        for (const month of oldMonths) {
+          await ensureBudget(req.userId, before.category_id, month, -Number(before.amount));
+        }
       }
-      for (const month of newMonths) {
-        await ensureBudget(req.userId, category_id, month, Number(amount));
+      if (type === 'expense' && !card_id) {
+        for (const month of newMonths) {
+          await ensureBudget(req.userId, category_id, month, Number(amount));
+        }
       }
     } catch (budgetErr) {
       // Nao impede a atualizacao.
@@ -158,7 +167,7 @@ router.delete('/:id', async (req, res) => {
         await ledger.deleteTransaction(connection, req.userId, t.id);
       }
       // Remove a previsao criada pela recorrencia em todos os meses cobertos.
-      if (r.type === 'expense' && r.category_id) {
+      if (r.type === 'expense' && r.category_id && !r.card_id) {
         for (const month of monthsBetween(r.start_date, r.end_date)) {
           await ensureBudget(req.userId, r.category_id, month, -Number(r.amount), connection);
         }
@@ -199,13 +208,14 @@ router.post('/:id/generate', async (req, res) => {
 
     await ledger.createTransaction(connection, req.userId, {
       account_id: r.account_id,
+      card_id: r.card_id || null,
       category_id: r.category_id,
       type: r.type,
       amount: r.amount,
       date: r.next_date,
       accrual_date: r.next_date,
       payment_date: r.next_date,
-      is_paid: true,
+      is_paid: !r.card_id,
       description: r.description,
       recurring_id: r.id,
       source: 'recurring',

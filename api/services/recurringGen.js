@@ -13,6 +13,8 @@ async function generateUpTo(conn, userId, recurring, upTo) {
   while (next <= limit && generated < 600) {
     await ledger.createTransaction(conn, userId, {
       account_id: recurring.account_id,
+      // Recorrencia em cartao gera compra na fatura (sem debitar conta).
+      card_id: recurring.card_id || null,
       category_id: recurring.category_id,
       type: recurring.type,
       amount: recurring.amount,
@@ -21,7 +23,7 @@ async function generateUpTo(conn, userId, recurring, upTo) {
       time: '00:00:00',
       accrual_date: next,
       payment_date: next,
-      is_paid: next <= today,
+      is_paid: recurring.card_id ? false : next <= today,
       description: recurring.description,
       recurring_id: recurring.id,
       source: 'recurring',
