@@ -51,6 +51,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   List<dynamic> cardInvoices = [];
   List<Transaction> monthTransactions = [];
   List<Account> accounts = [];
+  List<dynamic> cards = [];
   List<Category> expenseCategories = [];
   List<Category> incomeCategories = [];
   bool loading = true;
@@ -79,12 +80,13 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   Future<void> _load() async {
-    final [bRes, cRes, iRes, tRes, aRes] = await Future.wait([
+    final [bRes, cRes, iRes, tRes, aRes, cardRes] = await Future.wait([
       ApiService.get('/budgets?month=$month'),
       ApiService.get('/categories?type=expense&flat=true'),
       ApiService.get('/categories?type=income&flat=true'),
       ApiService.get('/transactions?month=$month&limit=1000&order=date_asc'),
       ApiService.get('/accounts'),
+      ApiService.get('/cards'),
     ]);
     setState(() {
       final bData = ApiService.decode(bRes) as Map<String, dynamic>;
@@ -100,6 +102,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           ? (ApiService.decode(aRes) as List)
               .map((e) => Account.fromJson(e))
               .toList()
+          : [];
+      cards = ApiService.decode(cardRes) is List
+          ? ApiService.decode(cardRes) as List
           : [];
       totals = bData['totals'] as Map<String, dynamic>? ?? {};
       expenseCategories = (ApiService.decode(cRes) as List)
@@ -376,6 +381,67 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     _load();
   }
 
+  // Paga a pendencia no cartao: o lancamento vira compra na fatura e
+  // sai da evolucao do saldo (quem projeta o debito e a fatura).
+  Future<void> _payWithCard(Transaction t) async {
+    if (cards.isEmpty) return;
+    int? cardId;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Pagar com cartão'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '"${t.description ?? t.categoryLabel ?? 'Transação'}" '
+                'de R\$ ${fmtMoney(t.amount)} vira compra na fatura. '
+                'Não debita a conta.',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: cardId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Cartão'),
+                items: [
+                  for (final c in cards)
+                    DropdownMenuItem(
+                      value: c['id'] as int,
+                      child: Text('${c['name']}'),
+                    ),
+                ],
+                onChanged: (v) => setDialog(() => cardId = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: cardId == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || cardId == null) return;
+    // is_paid=false: no cartao o "pago" acontece no pagamento da fatura.
+    await ApiService.put('/transactions/${t.id}', {
+      'card_id': cardId,
+      'account_id': null,
+      'is_paid': false,
+      'payment_method': 'CREDIT_CARD',
+    });
+    _load();
+  }
+
   Widget _payTile(Transaction t, bool paid) {
     final color = t.isIncome
         ? Colors.green.shade700
@@ -430,9 +496,22 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           ],
         ),
       ),
-      trailing: Text(
-        '$sign R\$ ${fmtMoney(t.amount)}',
-        style: TextStyle(color: color, fontWeight: FontWeight.bold),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Despesa pendente pode ser paga no cartao: vira compra na
+          // fatura e sai da evolucao do saldo.
+          if (!paid && t.isExpense && cards.isNotEmpty)
+            IconButton(
+              tooltip: 'Pagar com cartão',
+              icon: const Icon(Icons.credit_card, size: 20),
+              onPressed: () => _payWithCard(t),
+            ),
+          Text(
+            '$sign R\$ ${fmtMoney(t.amount)}',
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          ),
+        ],
       ),
     );
   }
@@ -547,6 +626,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       final inn = ids.contains(t.transferAccountId) ? t.amount : 0.0;
       return inn - out;
     }
+    // Compra no cartao nao mexe em conta (mesmo que ainda tenha
+    // account_id de uma conversao antiga): quem debita e a fatura.
+    if (t.cardId != null) return 0;
     if (!ids.contains(t.accountId)) return 0;
     return t.isIncome ? t.amount : -t.amount;
   }

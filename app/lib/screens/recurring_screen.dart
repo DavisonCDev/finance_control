@@ -69,36 +69,98 @@ class _RecurringScreenState extends State<RecurringScreen> {
   }
 
   Future<void> _showConfirmDialog(dynamic r) async {
+    // Recorrencia em conta pode ter so ESTA ocorrencia paga no cartao:
+    // o lancamento vira compra na fatura e nao sai do saldo em conta.
+    final onAccount = r['card_id'] == null;
+    if (onAccount && cards.isEmpty) await _loadMetadata();
+    if (!mounted) return;
+    final canUseCard =
+        onAccount && r['type'] == 'expense' && cards.isNotEmpty;
+    int? cardId;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmar débito'),
-        content: Text(
-          r['card_id'] != null
-              ? 'Lançar "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} na fatura do cartão?'
-              : 'A recorrência "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} prevista para ${fmtDate(r['next_date'])} foi realizada?',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Confirmar débito'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                r['card_id'] != null
+                    ? 'Lançar "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} na fatura do cartão?'
+                    : 'A recorrência "${r['description'] ?? ''}" de R\$ ${fmtMoney((r['amount'] as num))} prevista para ${fmtDate(r['next_date'])} foi realizada?',
+              ),
+              if (canUseCard) ...[
+                const SizedBox(height: 16),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: false,
+                      label: Text('Conta'),
+                      icon: Icon(Icons.account_balance, size: 16),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: Text('Cartão'),
+                      icon: Icon(Icons.credit_card, size: 16),
+                    ),
+                  ],
+                  selected: {cardId != null},
+                  onSelectionChanged: (s) => setDialog(() {
+                    cardId = s.first ? (cardId ?? cards.first['id'] as int) : null;
+                  }),
+                ),
+                if (cardId != null) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    initialValue: cardId,
+                    isExpanded: true,
+                    decoration:
+                        const InputDecoration(labelText: 'Cartão'),
+                    items: [
+                      for (final c in cards)
+                        DropdownMenuItem(
+                          value: c['id'] as int,
+                          child: Text('${c['name']}'),
+                        ),
+                    ],
+                    onChanged: (v) => setDialog(() => cardId = v),
+                  ),
+                ],
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Não'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(cardId != null ? 'Lançar na fatura' : 'Sim, debitar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Não'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sim, debitar'),
-          ),
-        ],
       ),
     );
 
     if (confirmed == true) {
-      final res = await ApiService.post('/recurring/${r['id']}/generate', {});
+      final res = await ApiService.post('/recurring/${r['id']}/generate', {
+        'card_id': ?cardId,
+      });
       if (res.statusCode >= 200 && res.statusCode < 300) {
         _load();
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Débito confirmado')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                cardId != null
+                    ? 'Compra lançada na fatura'
+                    : 'Débito confirmado',
+              ),
+            ),
+          );
         }
       }
     }

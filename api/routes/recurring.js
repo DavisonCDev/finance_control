@@ -188,6 +188,9 @@ router.delete('/:id', async (req, res) => {
 
 router.post('/:id/generate', async (req, res) => {
   const { id } = req.params;
+  // card_id no body: gera SÓ esta ocorrencia no cartao — a recorrencia
+  // continua em conta nos outros meses.
+  const overrideCardId = req.body?.card_id ? Number(req.body.card_id) : null;
   const connection = await db.getConnection();
 
   try {
@@ -206,16 +209,17 @@ router.post('/:id/generate', async (req, res) => {
       return res.json({ message: 'Recorrência finalizada.' });
     }
 
+    const cardId = overrideCardId || r.card_id || null;
     await ledger.createTransaction(connection, req.userId, {
-      account_id: r.account_id,
-      card_id: r.card_id || null,
+      account_id: cardId ? null : r.account_id,
+      card_id: cardId,
       category_id: r.category_id,
       type: r.type,
       amount: r.amount,
       date: r.next_date,
       accrual_date: r.next_date,
       payment_date: r.next_date,
-      is_paid: !r.card_id,
+      is_paid: !cardId,
       description: r.description,
       recurring_id: r.id,
       source: 'recurring',

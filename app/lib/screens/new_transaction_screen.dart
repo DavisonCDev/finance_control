@@ -197,10 +197,15 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
         'category_id': selectedCategoryId,
         'is_paid': isPaid,
       };
+      // Troca conta <-> cartao: o outro campo precisa ir null para o
+      // backend limpar a referencia antiga (senao o lancamento ficaria
+      // valendo nos dois lugares).
       if (selectedCardId != null) {
         body['card_id'] = selectedCardId;
+        body['account_id'] = null;
       } else {
         body['account_id'] = selectedAccountId;
+        body['card_id'] = null;
         if (type == 'transfer') {
           body['transfer_account_id'] = selectedTransferAccountId;
         }
