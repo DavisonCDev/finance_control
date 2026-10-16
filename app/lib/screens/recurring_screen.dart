@@ -388,7 +388,11 @@ class _RecurringScreenState extends State<RecurringScreen> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
+          : Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: ListView.builder(
               itemCount: items.length,
               itemBuilder: (_, i) {
                 final r = items[i];
@@ -429,11 +433,20 @@ class _RecurringScreenState extends State<RecurringScreen> {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'recurring_fab',
-        onPressed: _openCreate,
-        child: const Icon(Icons.add),
-      ),
+              ),
+            ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+          ? FloatingActionButton.extended(
+              heroTag: 'recurring_fab',
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add),
+              label: const Text('Nova recorrência'),
+            )
+          : FloatingActionButton(
+              heroTag: 'recurring_fab',
+              onPressed: _openCreate,
+              child: const Icon(Icons.add),
+            ),
     );
   }
 }

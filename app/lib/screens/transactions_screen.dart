@@ -97,11 +97,20 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   List<Category> categories = [];
   bool loading = true;
   final _filter = _Filter();
+  final _pastScroll = ScrollController();
+  final _futureScroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _pastScroll.dispose();
+    _futureScroll.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -136,6 +145,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   Future<void> _openAdd() async {
     final type = await showModalBottomSheet<String>(
       context: context,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -333,6 +343,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     final result = await showModalBottomSheet<_Filter>(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (context) {
         // Copia editavel: cancelar nao altera os filtros ativos.
         final draft = _filter.copy();
@@ -580,18 +591,19 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
   }
 
-  // Agrupa por data na ordem em que a lista vier.
-  List<Widget> _buildGrouped(List<_Entry> list) {
-    final items = <Widget>[];
+  // Achata a lista em itens (DateTime = cabecalho de dia, _Entry =
+  // lancamento) para alimentar o ListView.builder.
+  List<Object> _flatten(List<_Entry> list) {
+    final items = <Object>[];
     String? lastKey;
     for (final e in list) {
       final key =
           '${e.date.year}-${e.date.month.toString().padLeft(2, '0')}-${e.date.day.toString().padLeft(2, '0')}';
       if (key != lastKey) {
         lastKey = key;
-        items.add(_dayHeader(e.date));
+        items.add(e.date);
       }
-      items.add(e.tx != null ? _tile(e.tx!) : _invoiceTile(e.invoice));
+      items.add(e);
     }
     return items;
   }
@@ -748,20 +760,44 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
   }
 
-  Widget _tab(List<_Entry> list, String empty) {
+  Widget _tab(List<_Entry> list, String empty, ScrollController scroll) {
+    final wide = MediaQuery.sizeOf(context).width >= 1000;
+    final flat = _flatten(list);
     return RefreshIndicator(
       onRefresh: _load,
-      child: list.isEmpty
-          ? ListView(
-              children: [
-                const SizedBox(height: 120),
-                Center(child: Text(empty)),
-              ],
-            )
-          : ListView(
-              padding: const EdgeInsets.only(bottom: 88),
-              children: _buildGrouped(list),
-            ),
+      // Em telas largas o conteudo fica limitado e o scroll tem
+      // barra visivel — melhor para mouse/trackpad.
+      child: Scrollbar(
+        controller: scroll,
+        thumbVisibility: wide,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: list.isEmpty
+                ? ListView(
+                    controller: scroll,
+                    children: [
+                      const SizedBox(height: 120),
+                      Center(child: Text(empty)),
+                    ],
+                  )
+                : ListView.builder(
+                    controller: scroll,
+                    padding: const EdgeInsets.only(bottom: 88),
+                    itemCount: flat.length,
+                    itemBuilder: (_, i) {
+                      final it = flat[i];
+                      if (it is DateTime) return _dayHeader(it);
+                      final e = it as _Entry;
+                      return e.tx != null
+                          ? _tile(e.tx!)
+                          : _invoiceTile(e.invoice);
+                    },
+                  ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -798,18 +834,25 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                   Expanded(
                     child: TabBarView(
                       children: [
-                        _tab(_past, 'Nenhuma transação paga.'),
-                        _tab(_future, 'Nenhuma pendência.'),
+                        _tab(_past, 'Nenhuma transação paga.', _pastScroll),
+                        _tab(_future, 'Nenhuma pendência.', _futureScroll),
                       ],
                     ),
                   ),
                 ],
               ),
-        floatingActionButton: FloatingActionButton(
-          heroTag: 'transactions_fab',
-          onPressed: _openAdd,
-          child: const Icon(Icons.add),
-        ),
+        floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+            ? FloatingActionButton.extended(
+                heroTag: 'transactions_fab',
+                onPressed: _openAdd,
+                icon: const Icon(Icons.add),
+                label: const Text('Nova transação'),
+              )
+            : FloatingActionButton(
+                heroTag: 'transactions_fab',
+                onPressed: _openAdd,
+                child: const Icon(Icons.add),
+              ),
       ),
     );
   }

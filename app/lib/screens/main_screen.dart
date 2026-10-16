@@ -91,54 +91,37 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: Row(
         children: [
-          Drawer(
-          elevation: 0,
-          child: SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.account_balance,
-                        color: Theme.of(context).colorScheme.primary,
-                        size: 32,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Finance Control',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(),
-                Expanded(
-                  child: ListView(
-                    children: _items
-                        .map(
-                          (i) => ListTile(
-                            leading: Icon(
-                              i.icon,
-                              color: index == i.index
-                                  ? Theme.of(context).colorScheme.primary
-                                  : null,
-                            ),
-                            title: Text(i.label),
-                            selected: index == i.index,
-                            onTap: () => _setIndex(i.index),
+          // NavigationDrawer fixo (M3): destaque de selecao automatico.
+          NavigationDrawer(
+            selectedIndex: index,
+            onDestinationSelected: _setIndex,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.account_balance,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 32,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Finance Control',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
                           ),
-                        )
-                        .toList(),
-                  ),
+                    ),
+                  ],
                 ),
-              ],
               ),
-            ),
+              const SizedBox(height: 8),
+              for (final i in _items)
+                NavigationDrawerDestination(
+                  icon: Icon(i.icon),
+                  label: Text(i.label),
+                ),
+            ],
           ),
           const VerticalDivider(thickness: 1, width: 1),
           Expanded(child: _buildBody()),

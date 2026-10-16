@@ -138,6 +138,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
   Future<void> _openAdd() async {
     final action = await showModalBottomSheet<String>(
       context: context,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -198,6 +199,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
     if (investments.length == 1) return investments.first;
     return showModalBottomSheet<dynamic>(
       context: context,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -753,11 +755,18 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 ),
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'investments_fab',
-        onPressed: _openAdd,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+          ? FloatingActionButton.extended(
+              heroTag: 'investments_fab',
+              onPressed: _openAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('Novo investimento'),
+            )
+          : FloatingActionButton(
+              heroTag: 'investments_fab',
+              onPressed: _openAdd,
+              child: const Icon(Icons.add),
+            ),
     );
   }
 }

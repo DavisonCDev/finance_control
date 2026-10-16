@@ -31,6 +31,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   int? _viewingInvoiceId;
   bool _loadingDetail = false;
   final Map<int, Map<String, dynamic>> _invoiceCache = {};
+  final _purchasesScroll = ScrollController();
 
   static const _months = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -49,6 +50,12 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _purchasesScroll.dispose();
+    super.dispose();
   }
 
   String _monthLabel(String? ref) {
@@ -318,31 +325,48 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
           ? Center(child: Text(error!))
           : RefreshIndicator(
               onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _buildLimitCard(),
-                  const SizedBox(height: 16),
-                  _buildCurrentInvoice(),
-                  const SizedBox(height: 16),
-                  _buildUpcomingInvoices(),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.receipt_long),
-                    label: const Text('Histórico completo de faturas'),
-                    onPressed: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CardInvoicesScreen(
-                            cardId: widget.cardId,
-                            cardName: widget.cardName,
-                          ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  // Telas largas: limite/proximas faturas a esquerda e a
+                  // fatura em exibicao a direita — tudo visivel sem rolar.
+                  child: MediaQuery.sizeOf(context).width >= 1000
+                      ? ListView(
+                          padding: const EdgeInsets.all(16),
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      _buildLimitCard(),
+                                      const SizedBox(height: 16),
+                                      _buildUpcomingInvoices(),
+                                      const SizedBox(height: 16),
+                                      _historyButton(),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(child: _buildCurrentInvoice()),
+                              ],
+                            ),
+                          ],
+                        )
+                      : ListView(
+                          padding: const EdgeInsets.all(16),
+                          children: [
+                            _buildLimitCard(),
+                            const SizedBox(height: 16),
+                            _buildCurrentInvoice(),
+                            const SizedBox(height: 16),
+                            _buildUpcomingInvoices(),
+                            const SizedBox(height: 16),
+                            _historyButton(),
+                          ],
                         ),
-                      );
-                      _load();
-                    },
-                  ),
-                ],
+                ),
               ),
             ),
     );
@@ -421,6 +445,22 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
       ],
     );
   }
+
+  Widget _historyButton() => OutlinedButton.icon(
+        icon: const Icon(Icons.receipt_long),
+        label: const Text('Histórico completo de faturas'),
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CardInvoicesScreen(
+                cardId: widget.cardId,
+                cardName: widget.cardName,
+              ),
+            ),
+          );
+          _load();
+        },
+      );
 
   Widget _buildCurrentInvoice() {
     final options = _viewableInvoices;
@@ -570,38 +610,58 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 'Compras (${transactions.length})',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
-              ...transactions.map(
-                (t) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  onTap: () => _editPurchase(t),
-                  leading: Icon(
-                    t['is_refund'] == 1 ? Icons.undo : Icons.shopping_bag,
-                    size: 20,
-                    color: t['is_refund'] == 1
-                        ? Colors.green.shade600
-                        : Colors.red.shade400,
-                  ),
-                  title: Text(
-                    (t['description'] ?? t['category_name'] ?? 'Compra')
-                        .toString(),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    [
-                      fmtDate(t['date']),
-                      if (t['installment_number'] != null)
-                        'Parcela ${t['installment_number']}',
-                      t['category_name']?.toString() ?? '',
-                    ].where((s) => s.isNotEmpty).join(' • '),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_money(t['amount'])),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.chevron_right, size: 18),
-                    ],
+              // Lista de compras com altura limitada e scroll proprio:
+              // faturas longas nao empurram o restante da pagina.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 340),
+                child: Scrollbar(
+                  controller: _purchasesScroll,
+                  thumbVisibility: transactions.length > 6,
+                  child: ListView.builder(
+                    controller: _purchasesScroll,
+                    padding: EdgeInsets.zero,
+                    shrinkWrap: true,
+                    itemCount: transactions.length,
+                    itemBuilder: (_, i) {
+                      final t = transactions[i];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        onTap: () => _editPurchase(t),
+                        leading: Icon(
+                          t['is_refund'] == 1
+                              ? Icons.undo
+                              : Icons.shopping_bag,
+                          size: 20,
+                          color: t['is_refund'] == 1
+                              ? Colors.green.shade600
+                              : Colors.red.shade400,
+                        ),
+                        title: Text(
+                          (t['description'] ??
+                                  t['category_name'] ??
+                                  'Compra')
+                              .toString(),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          [
+                            fmtDate(t['date']),
+                            if (t['installment_number'] != null)
+                              'Parcela ${t['installment_number']}',
+                            t['category_name']?.toString() ?? '',
+                          ].where((s) => s.isNotEmpty).join(' • '),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(_money(t['amount'])),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right, size: 18),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

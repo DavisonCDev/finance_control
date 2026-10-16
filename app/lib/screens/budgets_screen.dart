@@ -54,6 +54,15 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Category> expenseCategories = [];
   List<Category> incomeCategories = [];
   bool loading = true;
+  // Scroll interno da evolucao do saldo: a lista tem altura limitada
+  // para nao alongar a pagina inteira.
+  final _flowScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _flowScroll.dispose();
+    super.dispose();
+  }
   String month = DateTime.now().toIso8601String().substring(0, 7);
   Map<String, dynamic> totals = {};
 
@@ -781,7 +790,20 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
               ],
             ),
             const Divider(height: 16),
-            ...rows,
+            // Linha do tempo com altura limitada e scroll proprio: a
+            // pagina nao cresce indefinidamente conforme os lancamentos.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 380),
+              child: Scrollbar(
+                controller: _flowScroll,
+                thumbVisibility: true,
+                child: ListView(
+                  controller: _flowScroll,
+                  padding: EdgeInsets.zero,
+                  children: rows,
+                ),
+              ),
+            ),
             const Divider(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -907,6 +929,104 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 1000;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Orçamento')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  child: wide ? _buildWide() : _buildNarrow(),
+                ),
+              ),
+            ),
+      floatingActionButton: wide
+          ? FloatingActionButton.extended(
+              heroTag: 'budgets_fab',
+              onPressed: _addBudget,
+              icon: const Icon(Icons.add),
+              label: const Text('Nova previsão'),
+            )
+          : FloatingActionButton(
+              heroTag: 'budgets_fab',
+              onPressed: _addBudget,
+              child: const Icon(Icons.add),
+            ),
+    );
+  }
+
+  // Layout estreito (celular, tablet em pe): coluna unica.
+  Widget _buildNarrow() => ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _monthPicker(),
+          const SizedBox(height: 16),
+          _summaryCard(),
+          const SizedBox(height: 16),
+          _buildFlowCard(),
+          const SizedBox(height: 16),
+          ..._budgetSections(),
+          ..._cardSections(),
+          ..._entriesSection(),
+        ],
+      );
+
+  // Layout largo (desktop, tablet deitado): duas colunas — resumo e
+  // evolucao a esquerda; previsoes, faturas e lancamentos a direita.
+  // Assim quase nao ha rolagem vertical.
+  Widget _buildWide() => ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _monthPicker(),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    _summaryCard(),
+                    const SizedBox(height: 16),
+                    _buildFlowCard(),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ..._budgetSections(),
+                    ..._cardSections(),
+                    ..._entriesSection(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+
+  Widget _monthPicker() => DropdownButtonFormField<String>(
+        initialValue: month,
+        decoration: const InputDecoration(labelText: 'Mês'),
+        items: _months
+            .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+            .toList(),
+        onChanged: (v) {
+          if (v == null) return;
+          setState(() {
+            month = v;
+            loading = true;
+          });
+          _load();
+        },
+      );
+
+  Widget _summaryCard() {
     final previstoTotal = (totals['forecast_total'] as num?)?.toDouble() ?? 0;
     final percent = (totals['percent'] as num?)?.toDouble() ?? 0;
     // Receita prevista = receitas ja lancadas + o que ainda falta
@@ -927,40 +1047,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     // Quanto a trajetoria real difere do que foi planejado.
     final diferencaPrevisto = _projectedEndBalance - saldoFinalPrevisto;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Orçamento')),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 900),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      DropdownButtonFormField<String>(
-                        initialValue: month,
-                        decoration: const InputDecoration(labelText: 'Mês'),
-                        items: _months
-                            .map(
-                              (m) => DropdownMenuItem(
-                                value: m,
-                                child: Text(m),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() {
-                            month = v;
-                            loading = true;
-                          });
-                          _load();
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      Card(
+    return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Column(
@@ -1088,117 +1175,122 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                             ],
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildFlowCard(),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Despesas em conta',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleSmall
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          TextButton.icon(
-                            onPressed: _addBudget,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Previsão'),
-                          ),
-                        ],
-                      ),
-                      if (budgets.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: Text(
-                            'Nenhuma previsão ainda — ela é criada '
-                            'automaticamente a cada despesa ou recorrência, '
-                            'ou manualmente pelo botão acima.',
-                          ),
-                        ),
-                      ..._expenseGroups.map(_budgetGroupTile),
-                      if (_incomeGroups.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          'Receitas previstas',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-                        ..._incomeGroups.map(_budgetGroupTile),
-                      ],
-                      if (_invoicesByCard.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          'Cartões de crédito',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-                        ..._invoicesByCard.entries.map(
-                          (entry) => _buildCardSection(entry.key, entry.value),
-                        ),
-                      ],
-                      if (_entries.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          'Lançamentos do mês',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Toque para confirmar ou desfazer o pagamento.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        const SizedBox(height: 4),
-                        if (_pending.isNotEmpty) ...[
-                          Text(
-                            'Pendentes',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelLarge
-                                ?.copyWith(
-                                  color:
-                                      Theme.of(context).colorScheme.primary,
-                                ),
-                          ),
-                          ..._pending.map((t) => _payTile(t, false)),
-                        ],
-                        if (_confirmed.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Confirmados',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelLarge
-                                ?.copyWith(
-                                  color: Colors.green.shade700,
-                                ),
-                          ),
-                          ..._confirmed.map((t) => _payTile(t, true)),
-                        ],
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'budgets_fab',
-        onPressed: _addBudget,
-        child: const Icon(Icons.add),
-      ),
-    );
+                      );
   }
+
+  // Previsoes de despesa e receita agrupadas por categoria-pai.
+  List<Widget> _budgetSections() => [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Despesas em conta',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            TextButton.icon(
+              onPressed: _addBudget,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Previsão'),
+            ),
+          ],
+        ),
+        if (budgets.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(8),
+            child: Text(
+              'Nenhuma previsão ainda — ela é criada '
+              'automaticamente a cada despesa ou recorrência, '
+              'ou manualmente pelo botão acima.',
+            ),
+          ),
+        ..._expenseGroups.map(_budgetGroupTile),
+        if (_incomeGroups.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Receitas previstas',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          ..._incomeGroups.map(_budgetGroupTile),
+        ],
+      ];
+
+  // Faturas dos cartoes com vencimento no mes.
+  List<Widget> _cardSections() => [
+        if (_invoicesByCard.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Cartões de crédito',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          ..._invoicesByCard.entries.map(
+            (entry) => _buildCardSection(entry.key, entry.value),
+          ),
+        ],
+      ];
+
+  // Lancamentos do mes que podem ser confirmados. Os ja confirmados
+  // ficam recolhidos para nao alongar a pagina.
+  List<Widget> _entriesSection() => [
+        if (_entries.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Lançamentos do mês',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Toque para confirmar ou desfazer o pagamento.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 4),
+          if (_pending.isNotEmpty) ...[
+            Text(
+              'Pendentes',
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            ),
+            ..._pending.map((t) => _payTile(t, false)),
+          ],
+          if (_confirmed.isNotEmpty)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.check_circle,
+                color: Colors.green.shade700,
+                size: 20,
+              ),
+              title: Text(
+                'Confirmados (${_confirmed.length})',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelLarge
+                    ?.copyWith(color: Colors.green.shade700),
+              ),
+              children: [
+                for (final t in _confirmed) _payTile(t, true),
+              ],
+            ),
+        ],
+      ];
 
   // Cartao expansivel: cabecalho mostra nome + total das faturas do
   // mes; expandindo aparecem as faturas com as categorias das compras.

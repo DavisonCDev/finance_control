@@ -242,11 +242,18 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 ),
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'accounts_fab',
-        onPressed: _openForm,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+          ? FloatingActionButton.extended(
+              heroTag: 'accounts_fab',
+              onPressed: _openForm,
+              icon: const Icon(Icons.add),
+              label: const Text('Nova conta'),
+            )
+          : FloatingActionButton(
+              heroTag: 'accounts_fab',
+              onPressed: _openForm,
+              child: const Icon(Icons.add),
+            ),
     );
   }
 }

@@ -181,7 +181,11 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
+          : Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: ListView.builder(
               itemCount: invoices.length,
               itemBuilder: (_, i) {
                 final inv = invoices[i];
@@ -219,6 +223,8 @@ class _CardInvoicesScreenState extends State<CardInvoicesScreen> {
                   ),
                 );
               },
+            ),
+              ),
             ),
     );
   }

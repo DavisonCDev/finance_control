@@ -200,85 +200,109 @@ class _CardsScreenState extends State<CardsScreen> {
     );
   }
 
+  // Tile de um cartao com a barra de uso do limite.
+  Widget _cardTile(dynamic c) {
+    final percent =
+        c.limitAmount > 0 ? (c.usedLimit / c.limitAmount) : 0.0;
+    final barColor = percent >= 0.85
+        ? Theme.of(context).colorScheme.error
+        : percent >= 0.60
+            ? Colors.orange.shade700
+            : Colors.green.shade700;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: ListTile(
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  CardDetailScreen(cardId: c.id, cardName: c.name),
+            ),
+          );
+          _load();
+        },
+        leading: const Icon(Icons.credit_card),
+        title: Text(c.name),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Usado R\$ ${fmtMoney(c.usedLimit)} de R\$ ${fmtMoney(c.limitAmount)}'
+              '${c.dueDay != null ? ' • Vence dia ${c.dueDay}' : ''}',
+            ),
+            const SizedBox(height: 4),
+            LinearProgressIndicator(
+              value: percent.clamp(0.0, 1.0),
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
+              color: barColor,
+            ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () => _openForm(card: c),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.delete,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => _confirmDelete(c),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 1000;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cartões de crédito'),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: cards.length,
-              itemBuilder: (_, i) {
-                final c = cards[i];
-                final percent = c.limitAmount > 0
-                    ? (c.usedLimit / c.limitAmount)
-                    : 0.0;
-                final barColor = percent >= 0.85
-                    ? Theme.of(context).colorScheme.error
-                    : percent >= 0.60
-                    ? Colors.orange.shade700
-                    : Colors.green.shade700;
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: ListTile(
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              CardDetailScreen(cardId: c.id, cardName: c.name),
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                // Telas largas: grade de 2 colunas em vez de uma lista
+                // esticada na largura toda.
+                child: wide
+                    ? GridView.builder(
+                        padding: const EdgeInsets.all(8),
+                        gridDelegate:
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 560,
+                          mainAxisExtent: 120,
                         ),
-                      );
-                      _load();
-                    },
-                    leading: const Icon(Icons.credit_card),
-                    title: Text(c.name),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Usado R\$ ${fmtMoney(c.usedLimit)} de R\$ ${fmtMoney(c.limitAmount)}'
-                          '${c.dueDay != null ? ' • Vence dia ${c.dueDay}' : ''}',
-                        ),
-                        const SizedBox(height: 4),
-                        LinearProgressIndicator(
-                          value: percent.clamp(0.0, 1.0),
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerHighest,
-                          color: barColor,
-                        ),
-                      ],
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _openForm(card: c),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.delete,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                          onPressed: () => _confirmDelete(c),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+                        itemCount: cards.length,
+                        itemBuilder: (_, i) => _cardTile(cards[i]),
+                      )
+                    : ListView.builder(
+                        itemCount: cards.length,
+                        itemBuilder: (_, i) => _cardTile(cards[i]),
+                      ),
+              ),
             ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'cards_fab',
-        onPressed: _openForm,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+          ? FloatingActionButton.extended(
+              heroTag: 'cards_fab',
+              onPressed: _openForm,
+              icon: const Icon(Icons.add),
+              label: const Text('Novo cartão'),
+            )
+          : FloatingActionButton(
+              heroTag: 'cards_fab',
+              onPressed: _openForm,
+              child: const Icon(Icons.add),
+            ),
     );
   }
 }

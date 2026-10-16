@@ -110,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openAdd() async {
     final type = await showModalBottomSheet<String>(
       context: context,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -184,25 +185,51 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 900),
-                    child: Column(
-                      children: [
-                        _buildSummaryCards(),
-                        const SizedBox(height: 16),
-                        _buildAccountsCard(),
-                        const SizedBox(height: 16),
-                        _buildChart(),
-                      ],
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 1200),
+                    // Telas largas: resumo+contas a esquerda, grafico
+                    // maior a direita — a pagina inteira cabe sem rolar.
+                    child: MediaQuery.sizeOf(context).width >= 1000
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    _buildSummaryCards(),
+                                    const SizedBox(height: 16),
+                                    _buildAccountsCard(),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildChart(height: 340)),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              _buildSummaryCards(),
+                              const SizedBox(height: 16),
+                              _buildAccountsCard(),
+                              const SizedBox(height: 16),
+                              _buildChart(),
+                            ],
+                          ),
                   ),
                 ),
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'home_fab',
-        onPressed: _openAdd,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 1000
+          ? FloatingActionButton.extended(
+              heroTag: 'home_fab',
+              onPressed: _openAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('Nova transação'),
+            )
+          : FloatingActionButton(
+              heroTag: 'home_fab',
+              onPressed: _openAdd,
+              child: const Icon(Icons.add),
+            ),
     );
   }
 
@@ -351,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildChart() {
+  Widget _buildChart({double height = 200}) {
     final daily = _dailyExpenses;
     final scheme = Theme.of(context).colorScheme;
     final daysInMonth = DateTime(focusedDay.year, focusedDay.month + 1, 0).day;
@@ -383,7 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             SizedBox(
-              height: 200,
+              height: height,
               child: daily.isEmpty
                   ? const Center(child: Text('Nenhuma despesa paga neste mês.'))
                   : BarChart(
