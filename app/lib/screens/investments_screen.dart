@@ -121,7 +121,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
         lastDate: DateTime(2100),
       );
 
-  Widget _dateTile(DateTime date, void Function(void Function()) setDialog) {
+  Widget _dateTile(DateTime date, void Function(DateTime) onChanged) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.calendar_today, size: 20),
@@ -129,7 +129,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
       subtitle: Text(fmtDate(date)),
       onTap: () async {
         final d = await _pickDate(date);
-        if (d != null) setDialog(() => date = d);
+        if (d != null) onChanged(d);
       },
     );
   }
@@ -290,7 +290,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                       .toList(),
                   onChanged: (v) => setDialog(() => accountId = v),
                 ),
-                _dateTile(date, setDialog),
+                _dateTile(date, (d) => setDialog(() => date = d)),
               ],
             ),
           ),
@@ -381,7 +381,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                       .toList(),
                   onChanged: (v) => setDialog(() => accountId = v),
                 ),
-                _dateTile(date, setDialog),
+                _dateTile(date, (d) => setDialog(() => date = d)),
                 // Aporte programado: sem repeticao fica pendente na data;
                 // com repeticao vira recorrencia — ambos entram nos
                 // lancamentos futuros, nas previsoes e na evolucao.
@@ -498,7 +498,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 ),
                 autofocus: true,
               ),
-              _dateTile(date, setDialog),
+              _dateTile(date, (d) => setDialog(() => date = d)),
             ],
           ),
           actions: [
@@ -564,7 +564,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                     .toList(),
                 onChanged: (v) => setDialog(() => accountId = v),
               ),
-              _dateTile(date, setDialog),
+              _dateTile(date, (d) => setDialog(() => date = d)),
             ],
           ),
           actions: [
