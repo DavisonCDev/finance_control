@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'accounts_screen.dart';
 import 'transactions_screen.dart';
+import 'recurring_screen.dart';
 import 'budgets_screen.dart';
 import 'cards_screen.dart';
 import 'investments_screen.dart';
@@ -31,8 +32,9 @@ class _MainScreenState extends State<MainScreen> {
     _NavItem(1, 'Contas', Icons.account_balance, () => const AccountsScreen()),
     _NavItem(2, 'Cartões', Icons.credit_card, () => const CardsScreen()),
     _NavItem(3, 'Transações', Icons.swap_horiz, () => const TransactionsScreen()),
-    _NavItem(4, 'Orçamento', Icons.flag, () => const BudgetsScreen()),
-    _NavItem(5, 'Investimentos', Icons.trending_up, () => const InvestmentsScreen()),
+    _NavItem(4, 'Recorrentes', Icons.event_repeat, () => const RecurringScreen()),
+    _NavItem(5, 'Orçamento', Icons.flag, () => const BudgetsScreen()),
+    _NavItem(6, 'Investimentos', Icons.trending_up, () => const InvestmentsScreen()),
   ];
 
   void _setIndex(int i) => setState(() => index = i);

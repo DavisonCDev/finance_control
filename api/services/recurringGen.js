@@ -15,6 +15,9 @@ async function generateUpTo(conn, userId, recurring, upTo) {
       account_id: recurring.account_id,
       // Recorrencia em cartao gera compra na fatura (sem debitar conta).
       card_id: recurring.card_id || null,
+      // Recorrencia de aporte: cada ocorrencia paga vira movimento do
+      // investimento automaticamente (sync do ledger).
+      investment_id: recurring.investment_id || null,
       category_id: recurring.category_id,
       type: recurring.type,
       amount: recurring.amount,

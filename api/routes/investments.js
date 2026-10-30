@@ -8,6 +8,9 @@ const { audit } = require('../lib/audit');
 const scope = require('../lib/scope');
 const ledger = require('../lib/ledger');
 const dates = require('../lib/dates');
+const { recomputeTotals } = require('../lib/investmentMovements');
+const { ensureBudgetsForRecurring } = require('../services/autoBudget');
+const { generateUpTo, horizonDate } = require('../services/recurringGen');
 
 const router = express.Router();
 router.use(authenticate);
@@ -127,34 +130,20 @@ async function loadOwn(userId, id, conn = db) {
   return rows[0];
 }
 
-/**
- * Recalcula invested_amount/current_amount reproduzindo os movimentos em ordem.
- * Reprocessar é mais seguro que somar/subtrair incrementalmente: garante que a
- * exclusão de um movimento (inclusive de uma marcação a mercado, que sobrescreve
- * o valor atual) deixe os totais coerentes com o histórico restante.
- */
-async function recomputeTotals(conn, investmentId) {
-  const [movements] = await conn.query(
-    'SELECT kind, amount FROM investment_movements WHERE investment_id = ? ORDER BY date ASC, id ASC',
-    [investmentId]
+// Categoria usada nos lancamentos de aporte/resgate: garante que entrem
+// nas previsoes e nos relatorios por categoria. Cria uma vez por usuario.
+async function ensureInvestmentsCategory(userId) {
+  const [rows] = await db.query(
+    `SELECT id FROM categories WHERE name = 'Investimentos' AND type = 'expense'
+       AND parent_id IS NULL AND (user_id IS NULL OR user_id = ?) LIMIT 1`,
+    [userId]
   );
-
-  let invested = 0;
-  let current = 0;
-  for (const m of movements) {
-    const amount = Number(m.amount || 0);
-    if (m.kind === 'contribution') { invested += amount; current += amount; }
-    else if (m.kind === 'withdrawal') { invested -= amount; current -= amount; }
-    else if (m.kind === 'dividend' || m.kind === 'yield') current += amount;
-    else if (m.kind === 'fee' || m.kind === 'tax') current -= amount;
-    else if (m.kind === 'valuation') current = amount;
-  }
-
-  invested = round(Math.max(invested, 0));
-  current = round(Math.max(current, 0));
-
-  await conn.query('UPDATE investments SET invested_amount = ?, current_amount = ? WHERE id = ?', [invested, current, investmentId]);
-  return { invested_amount: invested, current_amount: current };
+  if (rows.length > 0) return rows[0].id;
+  const [result] = await db.query(
+    `INSERT INTO categories (user_id, name, type, color, icon, sort_order)
+     VALUES (NULL, 'Investimentos', 'expense', '#2E7D32', 'savings', 15)`
+  );
+  return result.insertId;
 }
 
 // GET / — carteira do usuário + investimentos das famílias visíveis.
@@ -505,20 +494,68 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 }));
 
 // POST /:id/movements — aporte, resgate, provento, taxa ou marcação a mercado.
+// Campos extras de aporte:
+//   - is_paid=false: fica pendente — aparece nos lancamentos futuros e na
+//     evolucao, mas so vira movimento quando o usuario der baixa.
+//   - recurring='monthly'|...: cria uma recorrencia de aporte — gera os
+//     lancamentos futuros e a previsao da categoria Investimentos.
 router.post('/:id/movements', asyncHandler(async (req, res) => {
   const investment = await loadOwn(req.userId, req.params.id);
-  const { kind, amount, quantity, unit_price, date, notes, account_id } = req.body;
+  const { kind, amount, quantity, unit_price, date, notes, account_id, recurring, end_date } = req.body;
+  const isPaid = parseBool(req.body.is_paid) !== false;
 
   if (!kind || !KINDS.includes(kind)) throw badRequest(`Tipo de movimento inválido. Use: ${KINDS.join(', ')}.`);
   const value = kind === 'valuation' ? Number(amount) : positiveAmount(amount, 'Valor do movimento');
   if (kind === 'valuation' && (!Number.isFinite(value) || value < 0)) throw badRequest('Valor de mercado inválido.');
   const movementDate = date || dates.toIsoDate(new Date());
 
+  if (recurring && kind !== 'contribution') {
+    throw badRequest('Só é possível programar recorrência para aportes.');
+  }
+  if (recurring && !dates.FREQUENCY_STEPS[recurring]) {
+    throw badRequest(`Periodicidade inválida. Use: ${Object.keys(dates.FREQUENCY_STEPS).join(', ')}.`);
+  }
+
   let account = null;
   if (account_id) {
     const [rows] = await db.query('SELECT * FROM accounts WHERE id = ? AND user_id = ?', [account_id, req.userId]);
     if (rows.length === 0) throw notFound('Conta não encontrada.');
     account = rows[0];
+  }
+
+  // Aporte recorrente: vira uma recorrencia de despesa em conta vinculada
+  // ao investimento. Cada ocorrencia gerada entra nos fluxos; quando paga,
+  // o movimento e criado automaticamente pelo ledger.
+  if (recurring) {
+    if (!account) throw badRequest('Informe a conta de onde sai o aporte.');
+    const categoryId = await ensureInvestmentsCategory(req.userId);
+    const created = await withTransaction(async conn => {
+      const [result] = await conn.query(
+        `INSERT INTO recurring_transactions
+           (user_id, account_id, card_id, investment_id, category_id, type, amount, description,
+            frequency, start_date, end_date, next_date)
+         VALUES (?, ?, NULL, ?, ?, 'expense', ?, ?, ?, ?, ?, ?)`,
+        [req.userId, account.id, investment.id, categoryId, value,
+         `Aporte: ${investment.name}`, recurring, movementDate, end_date || null, movementDate]
+      );
+      const [rows] = await conn.query('SELECT * FROM recurring_transactions WHERE id = ?', [result.insertId]);
+      const r = rows[0];
+      const upTo = end_date || horizonDate();
+      await generateUpTo(conn, req.userId, r, upTo);
+      return r;
+    });
+    // Previsao da categoria em todos os meses cobertos — como na rota
+    // de recorrencias, roda fora da transacao por usar o pool.
+    try {
+      await ensureBudgetsForRecurring(req.userId, created);
+    } catch (budgetErr) {
+      // Nao impede a criacao da recorrencia se o orcamento falhar.
+    }
+    await audit(req.userId, 'investment', investment.id, 'update', { recurring_aporte: created.id });
+    return res.status(201).json({
+      message: `Aporte recorrente criado para ${investment.name}.`,
+      recurring_id: created.id,
+    });
   }
 
   if (kind === 'withdrawal') {
@@ -530,6 +567,10 @@ router.post('/:id/movements', asyncHandler(async (req, res) => {
   if ((kind === 'fee' || kind === 'tax') && value > Number(investment.current_amount || 0) + 0.005) {
     throw badRequest('O valor lançado deixaria o investimento negativo.');
   }
+
+  // Categoria "Investimentos" nos lancamentos de aporte: entram nas
+  // previsoes e nos relatorios por categoria como qualquer despesa.
+  const categoryId = kind === 'contribution' ? await ensureInvestmentsCategory(req.userId) : null;
 
   const result = await withTransaction(async conn => {
     let transactionId = null;
@@ -546,41 +587,75 @@ router.post('/:id/movements', asyncHandler(async (req, res) => {
       if (flow) {
         const transaction = await ledger.createTransaction(conn, req.userId, {
           account_id: account.id,
+          category_id: flow.type === 'expense' ? categoryId : null,
           type: flow.type,
           amount: value,
           date: movementDate,
+          time: isPaid ? new Date().toTimeString().slice(0, 8) : null,
           description: flow.description,
           notes: notes || null,
           currency: account.currency,
           family_id: investment.family_id || null,
           investment_id: investment.id,
           source: 'manual',
+          is_paid: isPaid,
         });
         transactionId = transaction.id;
       }
     }
 
-    const [inserted] = await conn.query(
-      `INSERT INTO investment_movements
-         (investment_id, kind, amount, quantity, unit_price, date, transaction_id, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        investment.id, kind, value,
-        quantity === undefined || quantity === null ? null : Number(quantity),
-        unit_price === undefined || unit_price === null ? null : Number(unit_price),
-        movementDate, transactionId, notes || null,
-      ]
-    );
+    // Aporte pendente (is_paid=false) nao vira movimento ainda: quem cria
+    // e o sync do ledger quando o usuario der baixa na transacao.
+    let insertedId = null;
+    if (transactionId) {
+      const [synced] = await conn.query(
+        'SELECT id FROM investment_movements WHERE transaction_id = ?',
+        [transactionId]
+      );
+      if (synced.length > 0) {
+        // O sync ja criou o movimento; completa com quantidade/preco/nota.
+        await conn.query(
+          `UPDATE investment_movements SET kind = ?, amount = ?, quantity = ?, unit_price = ?, date = ?, notes = ?
+           WHERE transaction_id = ?`,
+          [
+            kind, value,
+            quantity === undefined || quantity === null ? null : Number(quantity),
+            unit_price === undefined || unit_price === null ? null : Number(unit_price),
+            movementDate, notes || null, transactionId,
+          ]
+        );
+        insertedId = synced[0].id;
+      }
+    }
+    if (!insertedId && (!transactionId || isPaid)) {
+      const [inserted] = await conn.query(
+        `INSERT INTO investment_movements
+           (investment_id, kind, amount, quantity, unit_price, date, transaction_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          investment.id, kind, value,
+          quantity === undefined || quantity === null ? null : Number(quantity),
+          unit_price === undefined || unit_price === null ? null : Number(unit_price),
+          movementDate, transactionId, notes || null,
+        ]
+      );
+      insertedId = inserted.insertId;
+    }
 
     const totals = await recomputeTotals(conn, investment.id);
-    const [rows] = await conn.query('SELECT * FROM investment_movements WHERE id = ?', [inserted.insertId]);
-    return { movement: rows[0], totals };
+    const movement = insertedId
+      ? (await conn.query('SELECT * FROM investment_movements WHERE id = ?', [insertedId]))[0][0]
+      : null;
+    return { movement, totals };
   });
 
   await audit(req.userId, 'investment', investment.id, 'update', { movement: result.movement });
   res.status(201).json({
-    ...result.movement,
-    kind_label: KIND_LABELS[result.movement.kind] || result.movement.kind,
+    ...(result.movement || {}),
+    kind_label: result.movement
+      ? (KIND_LABELS[result.movement.kind] || result.movement.kind)
+      : KIND_LABELS[kind] || kind,
+    pending: !isPaid,
     investment: result.totals,
   });
 }));

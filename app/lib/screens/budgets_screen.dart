@@ -55,6 +55,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Category> expenseCategories = [];
   List<Category> incomeCategories = [];
   bool loading = true;
+  // Baixas em andamento: o tile mostra um indicador enquanto a API
+  // nao responde, para o usuario saber que o toque foi registrado.
+  final Set<int> _busy = {};
   // Scroll interno da evolucao do saldo: a lista tem altura limitada
   // para nao alongar a pagina inteira.
   final _flowScroll = ScrollController();
@@ -131,25 +134,148 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     return p != null ? '${p.name} › ${c.name}' : c.name;
   }
 
-  // Edita (ou remove) a previsao de uma categoria existente.
+  // Lancamentos do mes que cobrem a previsao: mesma regra do
+  // _coveredFor — categoria ou subcategoria dela, pagos e pendentes,
+  // incluindo compras no cartao.
+  List<Transaction> _transactionsFor(Budget b) {
+    final income = _budgetType(b) == 'income';
+    final list = monthTransactions
+        .where(
+          (t) =>
+              (income ? t.isIncome : t.isExpense) &&
+              (t.categoryId == b.categoryId ||
+                  _catById[t.categoryId]?.parentId == b.categoryId),
+        )
+        .toList();
+    list.sort((a, b) => a.date.compareTo(b.date));
+    return list;
+  }
+
+  // Edita (ou remove) a previsao de uma categoria existente. Alem do
+  // valor, mostra os lancamentos que a compoem no mes (pagos e futuros)
+  // com a soma — o usuario ve exatamente o que ja cobriu a previsao.
   Future<void> _editBudget(Budget b) async {
     final controller = TextEditingController(
       text: fmtMoney(b.amount),
     );
     final cat = _catById[b.categoryId];
+    final items = _transactionsFor(b);
+    final covered = items.fold(0.0, (s, t) => s + t.amount);
+    final income = _budgetType(b) == 'income';
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Previsão: ${cat != null ? _catLabel(cat) : b.categoryName}'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [MoneyInputFormatter()],
-          decoration: const InputDecoration(
-            labelText: 'Valor previsto',
-            prefixText: 'R\$ ',
-          ),
-          autofocus: true,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [MoneyInputFormatter()],
+              decoration: const InputDecoration(
+                labelText: 'Valor previsto',
+                prefixText: 'R\$ ',
+              ),
+              autofocus: true,
+            ),
+            if (items.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Lançamentos do mês nesta categoria',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final t in items)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          t.cardId != null
+                              ? Icons.credit_card
+                              : t.isPaid
+                                  ? Icons.check_circle
+                                  : Icons.schedule,
+                          size: 20,
+                          color: t.cardId != null
+                              ? Colors.deepPurple
+                              : t.isPaid
+                                  ? Colors.green
+                                  : Theme.of(context).colorScheme.outline,
+                        ),
+                        title: Text(
+                          t.description ?? t.categoryLabel ?? 'Transação',
+                          overflow: TextOverflow.ellipsis,
+                          style: t.isPaid || t.cardId == null
+                              ? null
+                              : const TextStyle(fontStyle: FontStyle.italic),
+                        ),
+                        subtitle: Text(
+                          [
+                            fmtDate(t.date),
+                            if (t.cardId != null)
+                              t.cardName ?? 'Cartão'
+                            else if (t.accountName != null)
+                              t.accountName,
+                            if (!t.isPaid && t.cardId == null) 'pendente',
+                          ].join(' • '),
+                        ),
+                        trailing: Text(
+                          'R\$ ${fmtMoney(t.amount)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${income ? 'Recebido' : 'Pago'} + pendente',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'R\$ ${fmtMoney(covered)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    covered <= b.amount
+                        ? 'Falta ${income ? 'receber' : 'gastar'}'
+                        : 'Excedeu o previsto',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: covered <= b.amount
+                              ? Theme.of(context).colorScheme.outline
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                  ),
+                  Text(
+                    'R\$ ${fmtMoney((b.amount - covered).abs())}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: covered <= b.amount
+                              ? Theme.of(context).colorScheme.outline
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                  ),
+                ],
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(
@@ -376,9 +502,17 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   // Marca/desmarca pago — e aqui que a baixa de um lancamento acontece.
+  // O tile entra em "ocupado" enquanto a API processa, dando feedback
+  // visual imediato do toque.
   Future<void> _togglePaid(Transaction t) async {
-    await ApiService.put('/transactions/${t.id}', {'is_paid': !t.isPaid});
-    _load();
+    if (_busy.contains(t.id)) return;
+    setState(() => _busy.add(t.id));
+    try {
+      await ApiService.put('/transactions/${t.id}', {'is_paid': !t.isPaid});
+    } finally {
+      if (mounted) setState(() => _busy.remove(t.id));
+    }
+    if (mounted) _load();
   }
 
   // Paga a pendencia no cartao: o lancamento vira compra na fatura e
@@ -454,18 +588,29 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     final overdue = !paid &&
         DateTime(t.date.year, t.date.month, t.date.day)
             .isBefore(DateTime(now.year, now.month, now.day));
+    final busy = _busy.contains(t.id);
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.zero,
-      onTap: () => _togglePaid(t),
-      leading: IconButton(
-        tooltip: paid ? 'Desmarcar pago' : 'Marcar como pago',
-        icon: Icon(
-          paid ? Icons.check_circle : Icons.radio_button_unchecked,
-          color: paid ? Colors.green : Theme.of(context).colorScheme.outline,
-        ),
-        onPressed: () => _togglePaid(t),
-      ),
+      onTap: busy ? null : () => _togglePaid(t),
+      leading: busy
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: Padding(
+                padding: EdgeInsets.all(2),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          : IconButton(
+              tooltip: paid ? 'Desmarcar pago' : 'Marcar como pago',
+              icon: Icon(
+                paid ? Icons.check_circle : Icons.radio_button_unchecked,
+                color:
+                    paid ? Colors.green : Theme.of(context).colorScheme.outline,
+              ),
+              onPressed: () => _togglePaid(t),
+            ),
       title: Text(
         t.description ?? t.categoryLabel ?? 'Transação',
         style: paid
@@ -500,8 +645,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // Despesa pendente pode ser paga no cartao: vira compra na
-          // fatura e sai da evolucao do saldo.
-          if (!paid && t.isExpense && cards.isNotEmpty)
+          // fatura e sai da evolucao do saldo. Aporte programado fica
+          // de fora — no cartao ele nunca viraria movimento.
+          if (!paid &&
+              t.isExpense &&
+              t.investmentId == null &&
+              cards.isNotEmpty)
             IconButton(
               tooltip: 'Pagar com cartão',
               icon: const Icon(Icons.credit_card, size: 20),

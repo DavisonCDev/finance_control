@@ -23,12 +23,13 @@ router.use(authenticate);
 router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT r.*, CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END as category_name, a.name as account_name, cc.name as card_name
+      `SELECT r.*, CASE WHEN p.name IS NULL THEN c.name ELSE CONCAT(p.name, ' › ', c.name) END as category_name, a.name as account_name, cc.name as card_name, i.name as investment_name
        FROM recurring_transactions r
        LEFT JOIN categories c ON r.category_id = c.id
        LEFT JOIN categories p ON p.id = c.parent_id
        LEFT JOIN accounts a ON r.account_id = a.id
        LEFT JOIN credit_cards cc ON r.card_id = cc.id
+       LEFT JOIN investments i ON r.investment_id = i.id
        WHERE r.user_id = ? AND r.active = TRUE
        ORDER BY r.next_date`,
       [req.userId]
@@ -40,7 +41,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
+  const { account_id, card_id, investment_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
   if (!type || !amount || !start_date || !frequency) {
     return res.status(400).json({ error: 'Tipo, valor, data início e frequência são obrigatórios.' });
   }
@@ -50,8 +51,8 @@ router.post('/', async (req, res) => {
 
   try {
     const [result] = await db.query(
-      'INSERT INTO recurring_transactions (user_id, account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date, next_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [req.userId, card_id ? null : account_id, card_id || null, category_id, type, amount, description, frequency, start_date, end_date, start_date]
+      'INSERT INTO recurring_transactions (user_id, account_id, card_id, investment_id, category_id, type, amount, description, frequency, start_date, end_date, next_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.userId, card_id ? null : account_id, card_id || null, investment_id || null, category_id, type, amount, description, frequency, start_date, end_date, start_date]
     );
     const [rows] = await db.query('SELECT * FROM recurring_transactions WHERE id = ?', [result.insertId]);
 
@@ -95,7 +96,7 @@ function monthsBetween(startDate, endDate, defaultYears = 5) {
 
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { account_id, card_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
+  const { account_id, card_id, investment_id, category_id, type, amount, description, frequency, start_date, end_date } = req.body;
 
   try {
     const [rows] = await db.query(
@@ -110,11 +111,15 @@ router.put('/:id', async (req, res) => {
 
     const [result] = await db.query(
       `UPDATE recurring_transactions
-       SET account_id = ?, card_id = ?, category_id = ?, type = ?, amount = ?, description = ?,
+       SET account_id = ?, card_id = ?, investment_id = ?, category_id = ?, type = ?, amount = ?, description = ?,
            frequency = ?, start_date = ?, end_date = ?, next_date = ?
        WHERE id = ?`,
       [
-        card_id ? null : account_id, card_id || null, category_id, type, amount, description,
+        card_id ? null : account_id, card_id || null,
+        // Recorrencia de aporte: o vinculo com o investimento se preserva
+        // quando o app nao envia o campo (edicao por outra tela).
+        investment_id === undefined ? before.investment_id : investment_id,
+        category_id, type, amount, description,
         frequency, start_date, end_date,
         new Date(start_date) <= new Date(before.start_date) ? start_date : before.next_date,
         id

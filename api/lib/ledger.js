@@ -6,6 +6,7 @@
 // nos relatórios — quem consulta filtra `type <> 'transfer'`.
 const { invoicePeriodFor } = require('./dates');
 const { ensureBudget, ensureBudgetForTransaction } = require('../services/autoBudget');
+const investmentMovements = require('./investmentMovements');
 
 const BALANCE_SIGN = { income: 1, expense: -1, adjustment: 1 };
 
@@ -225,6 +226,12 @@ async function createTransaction(conn, userId, payload) {
     date, recurring_id, card_id, source,
   }, conn);
 
+  // Lancamento de aporte/resgate pago ja nasce com o movimento do
+  // investimento registrado; pendente so ganha movimento na baixa.
+  if (investment_id) {
+    await investmentMovements.syncForTransaction(conn, userId, transactionId);
+  }
+
   return findTransaction(conn, transactionId);
 }
 
@@ -266,6 +273,9 @@ async function deleteTransaction(conn, userId, transactionId) {
     );
     await syncInstallmentProgress(conn, tx.installment_id);
   }
+
+  // Se o lancamento alimentava um investimento, o movimento sai junto.
+  await investmentMovements.removeForTransaction(conn, tx);
 
   return tx;
 }
@@ -390,6 +400,12 @@ async function updateTransaction(conn, userId, transactionId, payload) {
         await ensureBudget(userId, merged.category_id, afterMonth, afterContrib, conn);
       }
     }
+  }
+
+  // Aporte/resgate vinculado: baixa, desfazimento, edicao de valor ou
+  // data refletem automaticamente no movimento do investimento.
+  if (before.investment_id) {
+    await investmentMovements.syncForTransaction(conn, userId, transactionId);
   }
 
   return findTransaction(conn, transactionId);

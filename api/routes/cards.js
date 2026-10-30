@@ -453,6 +453,41 @@ router.put('/:id', asyncHandler(async (req, res) => {
     ]
   );
 
+  // Mudou o fechamento ou o vencimento: recalcula as datas das faturas
+  // ainda nao quitadas — a evolucao do saldo usa a due_date gravada.
+  // Fatura em composicao ganha tambem o novo fechamento; ja fechada ou
+  // parcial mantem o fechamento historico e so atualiza o vencimento.
+  if (Number(merged.closing_day) !== Number(card.closing_day) ||
+      Number(merged.due_day) !== Number(card.due_day)) {
+    const closingDay = merged.closing_day || 1;
+    const dueDay = merged.due_day || 10;
+    const [openInvoices] = await db.query(
+      `SELECT id, reference_month, status FROM card_invoices
+       WHERE card_id = ? AND status IN ('open', 'closed', 'partial')`,
+      [card.id]
+    );
+    for (const inv of openInvoices) {
+      const [year, m] = String(inv.reference_month).split('-').map(Number);
+      const closingDate = new Date(year, m - 1, 1);
+      closingDate.setDate(dates.clampDay(year, m - 1, closingDay));
+      let dueMonth = m - 1;
+      if (dueDay < closingDay) dueMonth += 1;
+      const dueDate = new Date(year, dueMonth, 1);
+      dueDate.setDate(dates.clampDay(dueDate.getFullYear(), dueDate.getMonth(), dueDay));
+      if (inv.status === 'open') {
+        await db.query(
+          'UPDATE card_invoices SET closing_date = ?, due_date = ? WHERE id = ?',
+          [dates.toIsoDate(closingDate), dates.toIsoDate(dueDate), inv.id]
+        );
+      } else {
+        await db.query(
+          'UPDATE card_invoices SET due_date = ? WHERE id = ?',
+          [dates.toIsoDate(dueDate), inv.id]
+        );
+      }
+    }
+  }
+
   const [rows] = await db.query('SELECT * FROM credit_cards WHERE id = ?', [card.id]);
   await audit(req.userId, 'credit_card', card.id, 'update', merged);
   res.json(rows[0]);

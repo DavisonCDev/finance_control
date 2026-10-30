@@ -344,62 +344,133 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
     final controller = TextEditingController();
     int? accountId = _debitableAccounts.first.id;
     DateTime date = DateTime.now();
+    String repeat = 'none';
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: Text('Aporte em ${inv['name']}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [MoneyInputFormatter()],
-                decoration: const InputDecoration(
-                  labelText: 'Valor',
-                  prefixText: 'R\$ ',
+        builder: (context, setDialog) {
+          final today = DateTime.now();
+          final isFuture = DateTime(date.year, date.month, date.day)
+              .isAfter(DateTime(today.year, today.month, today.day));
+          return AlertDialog(
+            title: Text('Aporte em ${inv['name']}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [MoneyInputFormatter()],
+                  decoration: const InputDecoration(
+                    labelText: 'Valor',
+                    prefixText: 'R\$ ',
+                  ),
+                  autofocus: true,
                 ),
-                autofocus: true,
+                DropdownButtonFormField<int>(
+                  initialValue: accountId,
+                  decoration:
+                      const InputDecoration(labelText: 'Sair da conta'),
+                  items: _debitableAccounts
+                      .map(
+                        (a) =>
+                            DropdownMenuItem(value: a.id, child: Text(a.name)),
+                      )
+                      .toList(),
+                  onChanged: (v) => setDialog(() => accountId = v),
+                ),
+                _dateTile(date, setDialog),
+                // Aporte programado: sem repeticao fica pendente na data;
+                // com repeticao vira recorrencia — ambos entram nos
+                // lancamentos futuros, nas previsoes e na evolucao.
+                DropdownButtonFormField<String>(
+                  initialValue: repeat,
+                  decoration: const InputDecoration(labelText: 'Repetir'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'none',
+                      child: Text('Não repetir'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'weekly',
+                      child: Text('Toda semana'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'monthly',
+                      child: Text('Todo mês'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'yearly',
+                      child: Text('Todo ano'),
+                    ),
+                  ],
+                  onChanged: (v) => setDialog(() => repeat = v ?? 'none'),
+                ),
+                if (isFuture || repeat != 'none')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      repeat != 'none'
+                          ? 'Vira recorrência: cada aporte aparece nos lançamentos e na evolução até a baixa.'
+                          : 'Fica pendente até a data — aparece nos lançamentos e na evolução do saldo.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
               ),
-              DropdownButtonFormField<int>(
-                initialValue: accountId,
-                decoration:
-                    const InputDecoration(labelText: 'Sair da conta'),
-                items: _debitableAccounts
-                    .map(
-                      (a) => DropdownMenuItem(value: a.id, child: Text(a.name)),
-                    )
-                    .toList(),
-                onChanged: (v) => setDialog(() => accountId = v),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(
+                  repeat != 'none'
+                      ? 'Programar'
+                      : isFuture
+                          ? 'Agendar'
+                          : 'Aplicar',
+                ),
               ),
-              _dateTile(date, setDialog),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Aplicar'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (ok != true) return;
     final amount = parseMoney(controller.text);
     if (amount == null || amount <= 0 || accountId == null) return;
-    await ApiService.post('/investments/${inv['id']}/movements', {
+    final today = DateTime.now();
+    final isFuture = DateTime(date.year, date.month, date.day)
+        .isAfter(DateTime(today.year, today.month, today.day));
+    final body = <String, dynamic>{
       'kind': 'contribution',
       'amount': amount,
       'account_id': accountId,
       'date': date.toIso8601String().substring(0, 10),
-    });
+    };
+    if (repeat != 'none') {
+      body['recurring'] = repeat;
+    } else if (isFuture) {
+      body['is_paid'] = false;
+    }
+    await ApiService.post('/investments/${inv['id']}/movements', body);
+    if (mounted && (repeat != 'none' || isFuture)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            repeat != 'none'
+                ? 'Aporte recorrente programado.'
+                : 'Aporte agendado — dê baixa quando o dinheiro sair.',
+          ),
+        ),
+      );
+    }
     _movements.remove(inv['id']);
     _load();
     _loadMovements(inv['id']);

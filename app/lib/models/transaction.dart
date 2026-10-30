@@ -10,6 +10,7 @@ class Transaction {
   final int? transferAccountId;
   final int? costCenterId;
   final int? contactId;
+  final int? investmentId;
   final String type;
   final double amount;
   final DateTime date;
@@ -43,6 +44,7 @@ class Transaction {
     this.transferAccountId,
     this.costCenterId,
     this.contactId,
+    this.investmentId,
     required this.type,
     required this.amount,
     required this.date,
@@ -78,6 +80,7 @@ class Transaction {
       transferAccountId: json['transfer_account_id'],
       costCenterId: json['cost_center_id'],
       contactId: json['contact_id'],
+      investmentId: json['investment_id'],
       type: json['type'],
       amount: double.tryParse(json['amount'].toString()) ?? 0.0,
       date: DateTime.parse(json['date']),

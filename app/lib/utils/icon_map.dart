@@ -44,6 +44,13 @@ const Map<String, IconData> _icons = {
   'local_cafe': Icons.local_cafe,
   'local_bar': Icons.local_bar,
   'lunch_dining': Icons.lunch_dining,
+  // supermercado
+  'eco': Icons.eco,
+  'set_meal': Icons.set_meal,
+  'egg_alt': Icons.egg_alt,
+  'wine_bar': Icons.wine_bar,
+  'ac_unit': Icons.ac_unit,
+  'icecream': Icons.icecream,
   // transporte
   'directions_car': Icons.directions_car,
   'local_gas_station': Icons.local_gas_station,
