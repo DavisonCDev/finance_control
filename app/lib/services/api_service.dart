@@ -10,9 +10,12 @@ class ApiService {
     final saved = prefs.getString('apiBaseUrl');
     if (saved != null && saved.isNotEmpty) {
       baseUrl = saved;
-      // Migra URLs antigas salvas no aparelho (Railway ou IP direto)
-      // para o backend na instancia Oracle.
-      if (saved.contains('railway.app') || saved.contains('129.148.60.52')) {
+      // Migra URLs antigas salvas no aparelho (Railway, IP direto ou
+      // restos de desenvolvimento local) para o backend na instancia Oracle.
+      if (saved.contains('railway.app') ||
+          saved.contains('129.148.60.52') ||
+          saved.contains('localhost') ||
+          saved.contains('127.0.0.1')) {
         await setBaseUrl('https://api.lunardes.com.br/finance');
       }
     }
